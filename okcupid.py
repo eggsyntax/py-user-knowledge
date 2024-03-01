@@ -15,7 +15,7 @@ essay_prompts = {
     'essay9': 'You should message me if...',
 }
 
-def load_okcupid(filename='/Users/egg/datasets/okcupid/okcupid_profiles.csv', filter=None):
+def load_okcupid(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled.csv', filter=None):
     """
     Load OKCupid profile data from a CSV file, filtering rows based on optional criteria.
 

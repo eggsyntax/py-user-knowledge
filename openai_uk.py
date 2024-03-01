@@ -5,18 +5,24 @@ import requests
 
 def openai(context, tokenIds={}): 
     numTokens = len(tokenIds) if tokenIds else 5
-    response = requests.post('https://api.openai.com/v1/completions', json={
-        'model': "gpt-3.5-turbo-instruct",
-        'prompt': context,
-        'max_tokens': 1,
-        'logprobs': numTokens,
-        'temperature': 0,
-        'logit_bias': tokenIds
-    }, headers={
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer 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'
-    })
-    data = response.json()
+    try:
+        response = requests.post('https://api.openai.com/v1/completions', json={
+            'model': "gpt-3.5-turbo-instruct",
+            'prompt': context,
+            'max_tokens': 1,
+            'logprobs': numTokens,
+            'temperature': 0,
+            'logit_bias': tokenIds
+        }, headers={
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer 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'
+        })
+        data = response.json()
+    except Exception as e:
+        print(f"Error in request or response: {e}")
+        if response:
+            print(f"Response: {response}")
+        return None
     return data
 
 def call_openai(subjects, tokens, context_input):
@@ -41,7 +47,6 @@ def call_openai(subjects, tokens, context_input):
         # print(logprobs) # TEMP
         # display_logprobs(subject, data['choices'][0]['logprobs'])
         probs = convert_log_probs_to_percentages(logprobs)
-        user_estimates[subject] = probs
         # print(user_estimates)
         # print(probs) # TEMP
         # print('probs') # TEMP

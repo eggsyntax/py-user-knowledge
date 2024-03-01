@@ -1,5 +1,12 @@
+import datetime
+import json
 import okcupid
 import openai_uk
+import os
+import random
+import re
+
+NUM_PROFILES = 300
 
 ### Topic/token handling
 
@@ -18,6 +25,13 @@ import openai_uk
 #  'essay3': 'the way i look. i am... blend in.',
 #  'essay4': 'books: absurdistan,
 # }
+
+# Create a subdirectory for today's date, if that subdir doesn't already exist:
+today = str(datetime.date.today())
+RESULTS_DIR = f"results/{today}"
+if not os.path.exists(RESULTS_DIR):
+    os.makedirs(RESULTS_DIR)
+RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
 
 # Token conversion setup
 tokens = {
@@ -50,9 +64,49 @@ tokens = {
 
 subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
 
-def prune_profiles():
+### Pruning
+
+# Finding gender words:
+"""
+You are a system which analyzes messages as requested. You always respond with valid JSON output.
+
+Which words in the following passage, if any, make it possible to determine the author's gender? Answer with a JSON list.
+"""
+# Definitely hits false positives on about 1/3 of cases, but it's a start
+
+gender_synonyms = set([
+    r'\bhe\b', r'\bhim\b', r'\bhis\b', r'\bhimself\b', r'\bshe\b', r'\bher\b', 
+    r'\bhers\b', r'\bherself\b', r'\bman\b', r'\bwoman\b', r'\bmale\b', 
+    r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
+    ])
+
+def prune_profiles(profiles):
     """Remove profiles that ChatGPT says have explicit giveaways for demographics."""
-    pass
+    print('Pruning profiles...')
+    validish_profiles = []
+    invalidish_profiles = []
+
+    for profile in profiles:
+        # if the profile contains any of the words in gender_synonyms, print it and the relevant words:
+        # NOTE that this is wrong -- we only want to check the essy* fields, not the whole profile
+        is_invalid = False
+        for key, value in profile.items():
+            if any(re.search(word, value) for word in gender_synonyms):
+                is_invalid = True
+                continue
+        if is_invalid:
+            invalidish_profiles.append(profile)
+        else:
+            validish_profiles.append(profile)
+        if len(validish_profiles) >= NUM_PROFILES:
+            break
+
+    print("Pruning complete.")
+    print(f"  Validish profiles: {len(validish_profiles)}")
+    print(f"  Invalidish profiles: {len(invalidish_profiles)}")
+    return validish_profiles, invalidish_profiles
+
+### Helper functions for matching
 
 # Function to check whether a value in a profile matches a token result, eg whether 'gender' of ' male' / ' female' in the token results matches 'sex' of 'm' / 'f' in the profile
 def check_token_match(profile, token_result, subject):
@@ -72,13 +126,12 @@ def check_token_match(profile, token_result, subject):
     expected_profile_value = okc_vals[chosen_token]
     return profile_value == expected_profile_value
 
-
 # TODO am I using this?
 def split_to_match_and_estimate(matches):
     """Given a list for a particular topic, split it into one for matches and one for estimates."""
     # Example 'matches' list:
     # [{'match?': True, 'estimate': {...}}, {'match?': True, 'estimate': {...}}, ...]
-
+    #
     # Initialize two dictionaries to hold the separated data
     match_map = {}
     estimate_map = {}
@@ -107,6 +160,8 @@ def calculate_correctness_statistics(matches_by_topic):
     
     return correctness_statistics
 
+### Main profile processing
+
 def process_profile(profile):
     """process a single OKCupid profile, sending the essay questions to OpenAI and comparing the results to 
     the user's ground truth demographics"""
@@ -115,17 +170,21 @@ def process_profile(profile):
 
     # Prepare the user's essay responses for input to OpenAI
     context_input = ""
+    essay_input = " "
     for essay in okcupid.essay_prompts:
         if essay in profile:
             # context_input += essay_prompts[essay] + "\n" + profile[essay] + "\n\n"
             context_input += profile[essay] + "\n"
+            essay_input += profile[essay] + "\n"
     # Some profiles have no (or very little) essay text
-    if len(context_input) < 400:
-        print(f"Profile has too little text: {profile}")
+    if len(essay_input) < 400:
+        # print(f"Profile has too little text: {profile}")
         return None
     # Call OpenAI to get demographic estimates
     try:
         user_estimates = openai_uk.call_openai(subjects, tokens, context_input)
+        with open(RESPONSES_FILE, 'a') as f: 
+            f.write(json.dumps(user_estimates))
     # We'll just skip any profiles that cause problems
     # except Exception as e:
     except BlockingIOError as e:
@@ -152,15 +211,18 @@ def process_profile(profile):
         # print()
     return matches
 
-# main function which loads the OKCupid data and processes each profile
-def main():
-    profiles = okcupid.load_okcupid()
+### main function which loads the OKCupid data and processes each profile
+
+def main(profiles):
+    print('Getting estimates from OpenAI...')
     matches = []
     # Cost as of 2/25: ~$5 per 1000 profiles
-    for profile in profiles[:5]:
+    for profile in profiles[:NUM_PROFILES]:
         match = process_profile(profile)
         if match is not None:
             matches.append(match)
+            if len(matches) % 20 == 0:
+                print(f"Processed {len(matches)} profiles")
     # if match is not None:
     matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
     # Calculate and print the correctness statistics
@@ -168,7 +230,17 @@ def main():
     print(correctness_statistics)
     return matches
 
-main_matches = main()
+valid_profiles, invalid_profiles = prune_profiles(okcupid.load_okcupid())
+with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
+    f.write(json.dumps(valid_profiles))
+with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
+    f.write(json.dumps(invalid_profiles))
+# Clear previous responses if they exist
+try:
+    os.remove(RESPONSES_FILE)
+except FileNotFoundError:
+    pass
+main_matches = main(valid_profiles)
 
 # TODO 
 # - deal with education, age
