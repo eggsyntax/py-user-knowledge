@@ -1,36 +1,15 @@
-import datetime
 import json
 import okcupid
 import openai_uk
 import os
-import random
-import re
+import utils
 
-NUM_PROFILES = 300
+import plotly.express as px
+import plotly.graph_objects as go
 
 ### Topic/token handling
 
-# {'age': '22',
-#  'status': 'single',
-#  'sex': 'm',
-#  'orientation': 'straight',
-#  'education': 'working on college/university',
-#  'ethnicity': 'asian, white',
-#  'income': '-1',
-#  'job': 'transportation',
-#  'location': 'south san francisco,...california',
-#  'essay0': 'about me:  i would l...tion span.',
-#  'essay1': 'currently working as...zy sunday.',
-#  'essay2': 'making people laugh....implicity.',
-#  'essay3': 'the way i look. i am... blend in.',
-#  'essay4': 'books: absurdistan,
-# }
-
-# Create a subdirectory for today's date, if that subdir doesn't already exist:
-today = str(datetime.date.today())
-RESULTS_DIR = f"results/{today}"
-if not os.path.exists(RESULTS_DIR):
-    os.makedirs(RESULTS_DIR)
+RESULTS_DIR = utils.results_dir()
 RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
 
 # Token conversion setup
@@ -63,48 +42,6 @@ tokens = {
 }
 
 subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
-
-### Pruning
-
-# Finding gender words:
-"""
-You are a system which analyzes messages as requested. You always respond with valid JSON output.
-
-Which words in the following passage, if any, make it possible to determine the author's gender? Answer with a JSON list.
-"""
-# Definitely hits false positives on about 1/3 of cases, but it's a start
-
-gender_synonyms = set([
-    r'\bhe\b', r'\bhim\b', r'\bhis\b', r'\bhimself\b', r'\bshe\b', r'\bher\b', 
-    r'\bhers\b', r'\bherself\b', r'\bman\b', r'\bwoman\b', r'\bmale\b', 
-    r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
-    ])
-
-def prune_profiles(profiles):
-    """Remove profiles that ChatGPT says have explicit giveaways for demographics."""
-    print('Pruning profiles...')
-    validish_profiles = []
-    invalidish_profiles = []
-
-    for profile in profiles:
-        # if the profile contains any of the words in gender_synonyms, print it and the relevant words:
-        # NOTE that this is wrong -- we only want to check the essy* fields, not the whole profile
-        is_invalid = False
-        for key, value in profile.items():
-            if any(re.search(word, value) for word in gender_synonyms):
-                is_invalid = True
-                continue
-        if is_invalid:
-            invalidish_profiles.append(profile)
-        else:
-            validish_profiles.append(profile)
-        if len(validish_profiles) >= NUM_PROFILES:
-            break
-
-    print("Pruning complete.")
-    print(f"  Validish profiles: {len(validish_profiles)}")
-    print(f"  Invalidish profiles: {len(invalidish_profiles)}")
-    return validish_profiles, invalidish_profiles
 
 ### Helper functions for matching
 
@@ -160,6 +97,99 @@ def calculate_correctness_statistics(matches_by_topic):
     
     return correctness_statistics
 
+### Graphing 
+
+def summarize_matches(matches, category):
+    # Extracting data and converting it to the desired format for plotting
+    # Sloppy-ass GPT code
+    reduced_data = []
+    first_category = next(iter(matches[0][category]['estimate']))
+    print("<summarize_matches> base category: " + first_category + "; num matches: " + str(len(matches)))
+    for item in matches:
+        first_category_percentage = int(item[category]['estimate'][first_category].replace('%', ''))
+        reduced_data.append({first_category: first_category_percentage, 'Match?': item[category]['match?']})
+    print('Overall match percentage on ' + first_category + ': ' + str( len([x for x in reduced_data if x['Match?']]) / len(reduced_data) ))
+    # Initialize an empty dictionary to count occurrences and matches in buckets
+    percentage_counts = {}
+    # Populate the dictionary with data, creating buckets as needed
+    for entry in reduced_data:
+        percentage = entry[first_category]
+        bucket_key = f'{(percentage // 5) * 5:03d}-{((percentage // 5) * 5 + 4):03d}'
+        # Adjust the bucket_key for the range 95-100 so it's inclusive.
+        if percentage > 94:  # This covers 95 to 100
+            bucket_key = '095-100'
+        if bucket_key not in percentage_counts:
+            percentage_counts[bucket_key] = {'total': 0, 'matches': 0}
+        percentage_counts[bucket_key]['total'] += 1
+        if entry['Match?']:
+            percentage_counts[bucket_key]['matches'] += 1
+    print(f"<summarize_matches> reduced_data: {len(reduced_data)}, percentage_counts: {len(percentage_counts)}")
+    # Transform the dictionary into the desired list of maps format
+    with open(f'{RESULTS_DIR}/reduced_data.json', 'w') as f:
+        f.write(json.dumps(reduced_data))
+    plot_data = [{'x': key, 'total': value['total'], 'percent correct': (value['matches'] / value['total']) * 100 if value['total'] > 0 else 0} for key, value in percentage_counts.items()]
+    plot_data = sorted(plot_data, key=lambda m: m['x'])
+    with open(f'{RESULTS_DIR}/plot_data.json', 'w') as f:
+        f.write(json.dumps(plot_data))
+    return plot_data
+
+def graph_matches(matches):
+    """Starts with the structure of matches, which is a list of maps of this form:
+    `{'politics': {'match?': None, 'estimate': {' liberal': '100%', ' conservative': '0%'}}, 'gender': {'match?': True, 'estimate': {' female': '93%', ' male': '7%'}}, 'sexuality': {'match?': True, 'estimate': {' straight': '95%', ' gay': '3%', ' bisexual': '3%'}}, 'education': {'match?': None, 'estimate': {' Yes': '58%', ' No': '42%'}}, 'ethnicity': {'match?': True, 'estimate': {' White': '94%', ' Hispanic': '3%', ' Asian': '2%', ' Black': '0%'}}}`
+    and summarizes them into a relation between the percent confidence of the estimate and the match status"""
+    for subject in subjects:
+        summary_data = summarize_matches(matches, subject)
+        # fig = px.bar(summary_data, x='x', y='percent correct', hover_data='total', title='Percentage Confidence vs. Match Status')
+
+        # Hmm, let's do a different kind of bar chart. NB if I'm happy with this I should just prep the data 
+        # this way to begin with in summarize_matches.
+
+        # Preparing data for the stacked bar chart
+        correct_data = []
+        incorrect_data = []
+        for item in summary_data:
+            correct_count = round((item['percent correct'] / 100) * item['total'])
+            incorrect_count = item['total'] - correct_count
+            correct_data.append(correct_count)
+            incorrect_data.append(incorrect_count)
+
+        # Create the figure
+        fig = go.Figure(data=[
+            # go.Bar(name='Correct', x=[item['x'] for item in summary_data], y=correct_data, marker_color='#134e6d'),
+            # go.Bar(name='Incorrect', x=[item['x'] for item in summary_data], y=incorrect_data, marker_color='#7f2322')
+            go.Bar(name='Correct', x=[item['x'] for item in summary_data], y=correct_data, marker_color='#5A67A4'),
+            go.Bar(name='Incorrect', x=[item['x'] for item in summary_data], y=incorrect_data, marker_color='#A45A67')
+        ])
+
+        # Update the layout
+        # fig.update_layout(barmode='stack', title='Total vs. Correct/Incorrect Distribution',
+        #                 xaxis_title='Buckets', yaxis_title='Total Count', hovermode='x')
+
+        # # Add the line chart for 'percent correct'
+        # fig.add_trace(go.Scatter(x=[item['x'] for item in summary_data], y=[item['percent correct'] for item in summary_data], 
+        #                          mode='lines+markers', name='Percent Correct', line=dict(color='green')))
+
+        # # Update the layout
+        # fig.update_layout(barmode='stack', title='Total vs. Correct/Incorrect Distribution and Percent Correct',
+        #                 xaxis_title='Buckets', yaxis_title='Total Count', hovermode='x')
+        
+        # Update layout to add a secondary y-axis
+        fig.update_layout(
+            barmode='stack',
+            title=f'Total vs. Correct/Incorrect Distribution and Percent Correct: {subject}',
+            xaxis_title='Buckets',
+            yaxis=dict(title='Total Count', side='left', showgrid=False),
+            yaxis2=dict(title='Percent Correct', side='right', overlaying='y', showgrid=False),
+            hovermode='x'
+            )
+
+        # Add the line chart for 'percent correct' with the secondary y-axis
+        fig.add_trace(go.Scatter(x=[item['x'] for item in summary_data], y=[item['percent correct'] for item in summary_data],
+                                mode='lines+markers', name='Percent Correct', yaxis='y2', line=dict(color='#a59a52')))
+
+        fig.show()
+    return summary_data # NB summary data is just the one from the last category
+    
 ### Main profile processing
 
 def process_profile(profile):
@@ -169,35 +199,25 @@ def process_profile(profile):
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
     # Prepare the user's essay responses for input to OpenAI
-    context_input = ""
-    essay_input = " "
-    for essay in okcupid.essay_prompts:
-        if essay in profile:
-            # context_input += essay_prompts[essay] + "\n" + profile[essay] + "\n\n"
-            context_input += profile[essay] + "\n"
-            essay_input += profile[essay] + "\n"
-    # Some profiles have no (or very little) essay text
-    if len(essay_input) < 400:
-        # print(f"Profile has too little text: {profile}")
-        return None
+    context_input = okcupid.profile_essays(profile)
     # Call OpenAI to get demographic estimates
     try:
         user_estimates = openai_uk.call_openai(subjects, tokens, context_input)
         with open(RESPONSES_FILE, 'a') as f: 
-            f.write(json.dumps(user_estimates))
+            f.write(json.dumps(profile) + '\n')
+            f.write(json.dumps(user_estimates) + '\n\n')
     # We'll just skip any profiles that cause problems
     # except Exception as e:
     except BlockingIOError as e:
         print(f"Bad profile: {profile}")
         print(f"Error processing profile: {e}")
         return None
-
     # print()
     # print(f"Profile: {profile}")
     # print(f"Estimates: {user_estimates}")
     # print()
-
     # Compare the user's ground truth demographics to the estimates
+    # TODO 'matches' is used elsewhere to mean 'successfull matches' -- rename this
     matches = {}
     if user_estimates is None:
         return None
@@ -209,11 +229,11 @@ def process_profile(profile):
         # print(f"Ground truth: {profile[subject]}")
         # print(f"Estimate: {user_estimates[subject]}")
         # print()
+    # print("matches for profile " + json.dumps(profile))
+    # print(matches)
     return matches
 
-### main function which loads the OKCupid data and processes each profile
-
-def main(profiles):
+def process_profiles(profiles):
     print('Getting estimates from OpenAI...')
     matches = []
     # Cost as of 2/25: ~$5 per 1000 profiles
@@ -225,26 +245,40 @@ def main(profiles):
                 print(f"Processed {len(matches)} profiles")
     # if match is not None:
     matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
+    with open(f'{RESULTS_DIR}/matches.json', 'w') as f:
+        f.write(json.dumps(matches))
+    with open(f'{RESULTS_DIR}/matches_by_topic.json', 'w') as f:
+        f.write(json.dumps(matches_by_topic))
     # Calculate and print the correctness statistics
     correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     print(correctness_statistics)
     return matches
 
-valid_profiles, invalid_profiles = prune_profiles(okcupid.load_okcupid())
-with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
-    f.write(json.dumps(valid_profiles))
-with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
-    f.write(json.dumps(invalid_profiles))
-# Clear previous responses if they exist
-try:
-    os.remove(RESPONSES_FILE)
-except FileNotFoundError:
-    pass
-main_matches = main(valid_profiles)
+def main(ask_openai=False):
+    profiles = okcupid.load_okcupid()
+    # Clear previous responses if they exist
+    try:
+        os.remove(RESPONSES_FILE)
+    except FileNotFoundError:
+        pass
+
+    if ask_openai:
+        main_matches = process_profiles(profiles)
+    else:
+        with open(f'{RESULTS_DIR}/matches.json', 'r') as f:
+            main_matches = json.loads(f.read())
+    summary_data = graph_matches(main_matches)
+    return summary_data # NB summary data is just the one from the last category
+
+NUM_PROFILES = 20
+main(ask_openai=True)
 
 # TODO 
+# - push some sharegpt data through
+# - measure accuracy as a function of essays_len
+# - try having gpt-4 create essays as a persona with specific demographics
 # - deal with education, age
-# - prune data in various ways
+# - prune data in various ways (gender: done)
 # - calculate brier score along with basic correctness
-# - experiment with open ended description of user
+# - maybe experiment with open ended description of user
 pass

@@ -1,2 +1,7 @@
 .DS_Store
 __pycache__/
+# ignore conda dir in favor of conda_env.yml, which is created 
+# with `conda env export > conda_env.yml` and can be recreated
+# on other machines with `conda env create -f=conda_env.yml`.
+.conda/
+

@@ -1,6 +1,13 @@
 import csv 
+import json
+import re
+
+import okcupid
+import utils
 
 ### OKCupid data handling
+
+RESULTS_DIR = utils.results_dir()
 
 essay_prompts = {
     'essay0': 'Self Summary',
@@ -15,7 +22,13 @@ essay_prompts = {
     'essay9': 'You should message me if...',
 }
 
-def load_okcupid(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled.csv', filter=None):
+gender_synonyms = set([
+    r'\bhe\b', r'\bhim\b', r'\bhis\b', r'\bhimself\b', r'\bshe\b', r'\bher\b', 
+    r'\bhers\b', r'\bherself\b', r'\bman\b', r'\bwoman\b', r'\bmale\b', 
+    r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
+    ])
+
+def load_okcupid(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled.csv', filter=None, NUM_PROFILES=20):
     """
     Load OKCupid profile data from a CSV file, filtering rows based on optional criteria.
 
@@ -50,4 +63,54 @@ def load_okcupid(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled
             profile = {col: row[col] for col in columns if col in row}
             profiles.append(profile)
 
-    return profiles
+    # Prune
+
+    valid_profiles, invalid_profiles = prune_profiles(profiles, NUM_PROFILES)
+    with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
+        f.write(json.dumps(valid_profiles))
+    with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
+        f.write(json.dumps(invalid_profiles))
+    return valid_profiles
+
+def profile_essays(profile):
+    """Return the essay text from a profile"""
+    essay_input = " "
+    for essay in essay_prompts:
+        if essay in profile:
+            essay_input += profile[essay] + "\n"
+    return essay_input
+
+def prune_profiles(profiles, NUM_PROFILES=20):
+    """Remove profiles that include any of various synonyms for gender, or that just 
+    have too little essay text to use."""
+    print('Pruning profiles...')
+    validish_profiles = []
+    invalidish_profiles = []
+
+    for profile in profiles:
+        # if the profile contains any of the words in gender_synonyms, print it and the relevant words:
+        # NOTE that this is wrong -- we only want to check the essy* fields, not the whole profile
+        is_invalid = False
+        for key, value in profile.items():
+            if any(re.search(word, str(value)) for word in gender_synonyms):
+                is_invalid = True
+                continue
+        # Some profiles have no (or very little) essay text
+        essays_len = len(profile_essays(profile))
+        # TODO measure accuracy as a function of essays_len
+        profile['essays_len'] = essays_len
+        if essays_len < 400:
+            # print(f"Profile has too little text: {profile}")
+            # print(f"Profile has too little text")
+            is_invalid = True
+        if is_invalid:
+            invalidish_profiles.append(profile)
+        else:
+            validish_profiles.append(profile)
+        if len(validish_profiles) >= NUM_PROFILES:
+            break
+
+    print("Pruning complete.")
+    print(f"  Validish profiles: {len(validish_profiles)}")
+    print(f"  Invalidish profiles: {len(invalidish_profiles)}")
+    return validish_profiles, invalidish_profiles
