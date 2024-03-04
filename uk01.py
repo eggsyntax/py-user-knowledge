@@ -193,16 +193,15 @@ def graph_matches(matches):
 ### Main profile processing
 
 def process_profile(profile):
-    """process a single OKCupid profile, sending the essay questions to OpenAI and comparing the results to 
-    the user's ground truth demographics"""
-    # Example profile:
+    """process a single profile, sending the essay questions to OpenAI and 
+    comparing the results to the user's ground truth demographics"""
+    # Example okcupid profile:
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
-    # Prepare the user's essay responses for input to OpenAI
-    context_input = okcupid.profile_essays(profile)
     # Call OpenAI to get demographic estimates
     try:
-        user_estimates = openai_uk.call_openai(subjects, tokens, context_input)
+        # TODO maybe don't call openai if there's no ground truth! That'll save substantial money.
+        user_estimates = openai_uk.call_openai(subjects, tokens, profile['essay'])
         with open(RESPONSES_FILE, 'a') as f: 
             f.write(json.dumps(profile) + '\n')
             f.write(json.dumps(user_estimates) + '\n\n')
@@ -255,7 +254,7 @@ def process_profiles(profiles):
     return matches
 
 def main(ask_openai=False):
-    profiles = okcupid.load_okcupid()
+    profiles = okcupid.load_okcupid(NUM_PROFILES=NUM_PROFILES)
     # Clear previous responses if they exist
     try:
         os.remove(RESPONSES_FILE)
@@ -270,7 +269,7 @@ def main(ask_openai=False):
     summary_data = graph_matches(main_matches)
     return summary_data # NB summary data is just the one from the last category
 
-NUM_PROFILES = 20
+NUM_PROFILES = 10
 main(ask_openai=True)
 
 # TODO 

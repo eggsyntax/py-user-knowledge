@@ -96,8 +96,10 @@ def prune_profiles(profiles, NUM_PROFILES=20):
                 is_invalid = True
                 continue
         # Some profiles have no (or very little) essay text
-        essays_len = len(profile_essays(profile))
+        combined_essays = profile_essays(profile)
+        essays_len = len(combined_essays)
         # TODO measure accuracy as a function of essays_len
+        profile['essay'] = combined_essays
         profile['essays_len'] = essays_len
         if essays_len < 400:
             # print(f"Profile has too little text: {profile}")
