@@ -6,14 +6,15 @@ import requests
 def openai(context, tokenIds={}): 
     numTokens = len(tokenIds) if tokenIds else 5
     try:
-        response = requests.post('https://api.openai.com/v1/completions', json={
+        params = {
             'model': "gpt-3.5-turbo-instruct",
             'prompt': context,
             'max_tokens': 1,
             'logprobs': numTokens,
             'temperature': 0,
             'logit_bias': tokenIds
-        }, headers={
+        }
+        response = requests.post('https://api.openai.com/v1/completions', json=params, headers={
             'Content-Type': 'application/json',
             'Authorization': 'Bearer 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'
         })
