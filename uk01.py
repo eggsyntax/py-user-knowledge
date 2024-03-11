@@ -16,6 +16,13 @@ RESULTS_DIR = utils.results_dir()
 # RESULTS_DIR = 'results/2024-03-03_250'
 RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
 
+# TODO 
+# - change addendum to a question, see gender
+# - change okc_vals
+# - check for token ids, bias -- note that the tokens shouldn't be space-prefaced.
+#   - TODO if I want to be cool I should just combine eg ' male' 'male' ' Male' 'Male'.
+# 
+
 # Token conversion setup
 tokens = {
     'politics': {'addendum': 'Politically, this user is',
@@ -23,11 +30,11 @@ tokens = {
                  'bias': {' liberal': 80.35, ' conservative': 80.65},
                  'okc_name': None,
                  'okc_vals': None},
-    'gender': {'addendum': 'The gender of this user is',
+    'gender': {'addendum': 'Is the author of the preceding text male or female?',
                'tokenIds': {' male': 8762, ' female': 8954},
                'bias': {' male': 80, ' female': 80},
                'okc_name': 'sex', 
-               'okc_vals': {' male': 'm', ' female': 'f'}},
+               'okc_vals': {'male': 'm', 'female': 'f'}},
     'sexuality': {'addendum': 'Is this user straight, bisexual, or gay? They are',
                   'tokenIds': {' straight': 7833, ' bisexual': 56832, ' gay': 8485},
                   'bias': {' straight': 80, ' bisexual': 80, ' gay': 80},
@@ -45,7 +52,8 @@ tokens = {
                   'okc_vals': {' Black': 'black', ' White': 'white', ' Asian': 'asian', ' Hispanic': 'hispanic'}}
 }
 
-subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
+# subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
+subjects = ['gender']
 
 ### Helper functions for matching
 
@@ -66,7 +74,7 @@ def check_token_match(profile, token_result, subject):
     chosen_token = max(token_result, key=lambda k: int((token_result.get(k)[:-1]))) # strip trailing '%' & intify
     try:
         expected_profile_value = okc_vals[chosen_token]
-        return profile_value == expected_profile_value
+        return profile_value.lower() == expected_profile_value.lower()
     except KeyError as e:
         print(f"Ended up with a weird token result: {e}")
         return None
@@ -289,8 +297,10 @@ def process_profiles(profiles):
             matches.append(match)
             if len(matches) % 20 == 0:
                 print(f"Processed {len(matches)} profiles")
-    # if match is not None:
-    matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
+    if matches:
+        matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
+    else:
+        matches_by_topic = {}
     with open(f'{RESULTS_DIR}/matches.json', 'w') as f:
         f.write(json.dumps(matches))
     with open(f'{RESULTS_DIR}/matches_by_topic.json', 'w') as f:
@@ -317,8 +327,8 @@ def main(ask_openai=False, dataset_module=okcupid):
     summary_data = graph_matches(main_matches, correctness_statistics)
     return summary_data # NB summary data is just the one from the last category, not actually meaningful overall
 
-NUM_PROFILES = 10
-main(ask_openai=False, dataset_module=okcupid) # persuade, okcupid
+NUM_PROFILES = 250
+main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
 # - push some sharegpt data through
