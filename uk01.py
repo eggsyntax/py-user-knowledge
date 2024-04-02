@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 
@@ -7,7 +8,7 @@ import persuade
 import roc
 import utils
 
-import plotly.express as px
+import numpy as np
 import plotly.graph_objects as go
 
 ### Topic/token handling
@@ -16,44 +17,61 @@ RESULTS_DIR = utils.results_dir()
 # RESULTS_DIR = 'results/2024-03-03_250'
 RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
 
+# Main results (ok cupid, fairly early on, replace these):
+
+# 1000 samples
+# {'politics': n/a (no ground truth),
+#  'gender': 0.89,
+#  'sexuality': 0.84,
+#  'education': TODO (dataset uses a zillion categories),
+#  'ethnicity': 0.42
+#  }
+
+
+
 # TODO 
 # - change addendum to a question, see gender
 # - change okc_vals
 # - check for token ids, bias -- note that the tokens shouldn't be space-prefaced.
-#   - TODO if I want to be cool I should just combine eg ' male' 'male' ' Male' 'Male'.
+#   - TODO if I want to be cool I should just combine eg ' male' 'male' ' Male' 'Male'. But maybe not necessary.
 # 
 
 # Token conversion setup
 tokens = {
-    'politics': {'addendum': 'Politically, this user is',
+    'politics': {'addendum': 'Is the author of the preceding text liberal or conservative?',
                  'tokenIds': {' liberal': 18250, ' conservative': 15692},
                  'bias': {' liberal': 80.35, ' conservative': 80.65},
+                 'priors': {'liberal': 41, 'conservative': 59}, # https://news.gallup.com/poll/609914/women-become-liberal-men-mostly-stable.aspx, omitting 'moderate'
                  'okc_name': None,
                  'okc_vals': None},
     'gender': {'addendum': 'Is the author of the preceding text male or female?',
                'tokenIds': {' male': 8762, ' female': 8954},
                'bias': {' male': 80, ' female': 80},
+               'priors': {'m': 49.6, 'f': 50.4}, # https://www.statista.com/statistics/737923/us-population-by-gender/
                'okc_name': 'sex', 
                'okc_vals': {'male': 'm', 'female': 'f'}},
-    'sexuality': {'addendum': 'Is this user straight, bisexual, or gay? They are',
+    'sexuality': {'addendum': 'Is the author of the preceding text straight, bisexual, or gay?',
                   'tokenIds': {' straight': 7833, ' bisexual': 56832, ' gay': 8485},
                   'bias': {' straight': 80, ' bisexual': 80, ' gay': 80},
+                  'priors': {'straight': 93.0, 'gay': 3.0, 'bisexual': 4.0}, # https://news.gallup.com/poll/389792/lgbt-identification-ticks-up.aspx
                   'okc_name': 'orientation', 
-                  'okc_vals': {' straight': 'straight', ' bisexual': 'bisexual', ' gay': 'gay'}},
-    'education': {'addendum': 'Is this user college-educated? Answer Yes or No:',
+                  'okc_vals': {'straight': 'straight', 'bis': 'bisexual', 'gay': 'gay'}},
+    'education': {'addendum': 'Is the author of the preceding text college-educated? Answer yes or no:',
                   'tokenIds': {' Yes': 7566, ' No': 2360},
                   'bias': {' Yes': 80, ' No': 80},
+                  'priors': {'yes': 44.4, 'no': 55.6}, # https://www.collegetransitions.com/blog/percentage-of-americans-with-college-degrees/
                   'okc_name': 'education', 
                   'okc_vals': None}, # TODO
-    'ethnicity': {'addendum': 'What is this user\'s primary race or ethnicity? Is it Black, White, Asian, or Hispanic?',
+    'ethnicity': {'addendum': 'Is the author of the preceding text black, white, asian, or hispanic?',
                   'tokenIds': {' Black': 5348, ' White': 5929, ' Asian': 14875, ' Hispanic': 41985},
                   'bias': {' Black': 79, ' White': 82, ' Asian': 79, ' Hispanic': 79},
+                  'priors': {'black': 13.9, 'white': 60.2, 'asian': 6.4, 'hispanic': 19.5}, # https://www.census.gov/quickfacts/fact/table/US/PST045223 omitting other categories
                   'okc_name': 'ethnicity', 
-                  'okc_vals': {' Black': 'black', ' White': 'white', ' Asian': 'asian', ' Hispanic': 'hispanic'}}
+                  'okc_vals': {'black': 'black', 'white': 'white', 'as': 'asian', 'his': 'hispanic'}}
 }
 
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
-subjects = ['gender']
+subjects = ['gender', 'sexuality', 'ethnicity']
 
 ### Helper functions for matching
 
@@ -72,6 +90,7 @@ def check_token_match(profile, token_result, subject):
         return None
     
     chosen_token = max(token_result, key=lambda k: int((token_result.get(k)[:-1]))) # strip trailing '%' & intify
+    # print('chosen_token: ' + chosen_token) # XXX
     try:
         expected_profile_value = okc_vals[chosen_token]
         return profile_value.lower() == expected_profile_value.lower()
@@ -100,7 +119,8 @@ def calculate_correctness_statistics(matches_by_topic):
     correctness_statistics = {}
     
     for topic, items in matches_by_topic.items():
-        # Filter out items where 'match?' is not None
+        print(f"Calculating correctness statistics for {topic}...") # XXX
+        # Eliminate error cases (where 'match?' is None)
         filtered_items = [item for item in items if item['match?'] is not None]
         
         if not filtered_items:
@@ -109,6 +129,7 @@ def calculate_correctness_statistics(matches_by_topic):
         else:
             # Calculate the proportion of 'True' values
             true_count = sum(item['match?'] for item in filtered_items)
+            print(f"true_count for {topic}: {true_count}") # XXX
             proportion_true = true_count / len(filtered_items)
             correctness_statistics[topic] = proportion_true
     
@@ -116,30 +137,181 @@ def calculate_correctness_statistics(matches_by_topic):
 
 ### Graphing 
 
+# def stringify_summary_statistics(data, subject):
+#     data = copy.deepcopy(data)
+#     data.pop('category_percents', None)
+#     data.pop('estimate_percents', None)
+#     for key in data:
+#         # Removing entries with 0 values and formatting numbers
+#         data[key] = {sub_key: f"{sub_value:.2f}" for sub_key, sub_value in data[key].items() if sub_value != 0}
+#     text = ''
+#     for key, value in data.items():
+#         text += f"{key}: {value}<br />"
+#     return str(data)
+
+def stringify_summary_statistics(summary_statistics, category):
+    # Initialize a dictionary to hold the values for the category from each Brier score map
+    category_values = {
+        'data_brier': None,
+        'prior_brier': None,
+        'actual_brier': None
+    }
+    # Iterate over each Brier score map and retrieve the value for the specified category
+    for key in category_values.keys():
+        # Ensure the category exists in the current Brier score map before accessing its value
+        if category in summary_statistics[key]:
+            category_values[key] = round(summary_statistics[key][category], 2)
+        else:
+            # Handle the case where the category is not present in the current Brier score map
+            category_values[key] = 'N/A'
+    # Format the results into a string
+    result_str = f"data_brier: {category_values['data_brier']}, prior_brier: {category_values['prior_brier']}, actual_brier: {category_values['actual_brier']}"
+    return result_str
+
+def calculate_summary_statistics(matches, tokens):
+    """
+    Calculates overall percentages of ground truth and estimated values, as well as Brier scores for default and actual estimates.
+
+    Args:
+        matches (list): A list of dictionaries representing matches.
+        tokens (dict): A dictionary mapping keys to their corresponding token values.
+
+    Returns:
+        dict: A dictionary containing summary statistics.
+    """
+    category_percents = {} # Average percent in the data for each category
+    estimate_percents = {} # Average GPT-estimation for each category
+    data_brier = {} # Brier score for a model that just predicted the overall percent in the data sample (somewhat unfair advantage)
+    prior_brier = {} # Brier score for a model that just predicted the overall percent in the population
+    actual_brier = {} # Brier score for GPT
+
+    for category in tokens:
+        category_percents[category] = {}
+        estimate_percents[category] = {}
+        data_brier[category] = 0
+        prior_brier[category] = 0
+        actual_brier[category] = 0
+
+    total_matches = len(matches)
+
+    for match in matches:
+        for category, data in match.items():
+            if category not in tokens:
+                continue
+
+            ground_truth = data['ground_truth']
+            if ground_truth not in category_percents[category]:
+                category_percents[category][ground_truth] = 0
+            category_percents[category][ground_truth] += 1
+
+            for estimate_key, estimate_value in data['estimate'].items():
+                estimate_key = estimate_key # XXX
+                if estimate_key in tokens[category]['okc_vals']: # Skips case/leading-space variants which are rarely important
+                    okc_val = tokens[category]['okc_vals'][estimate_key]
+                    if okc_val not in estimate_percents[category]:
+                        estimate_percents[category][okc_val] = 0
+                    estimate_percents[category][okc_val] += float(estimate_value[:-1]) / 100
+
+    for category in category_percents:
+        for value in category_percents[category]:
+            category_percents[category][value] = category_percents[category][value] / total_matches * 100
+
+        for value in estimate_percents[category]:
+            estimate_percents[category][value] /= total_matches
+
+        for match in matches:
+            # if category in match:
+            if category in match and category == 'ethnicity': # XXX
+                ground_truth = match[category]['ground_truth']
+                # Actual Brier score
+                # for estimate_key, estimate_value in match[category]['estimate'].items():
+                # TODO maybe adopt these main_name, okc_name conventions for the other two loops
+                for main_name, okc_name in tokens[category]['okc_vals'].items():
+                    estimate_value = match[category]['estimate'].get(main_name)
+                    if estimate_value is not None and main_name in tokens[category]['okc_vals']: # TODO second clause is unneeded
+                        # okc_val = tokens[category]['okc_vals'][okc_name]
+                        actual_brier[category] += (float(estimate_value[:-1]) / 100 - 
+                                                   (1 if okc_name == ground_truth else 0)) ** 2
+                # Data Brier score
+                for _, category_key in tokens[category]['okc_vals'].items():
+                    category_value = category_percents[category].get(category_key)
+                    if category_value is not None:
+                        data_brier[category] += ((category_value / 100) - (1 if category_key == ground_truth else 0)) ** 2
+                # Prior Brier score
+                for _, category_key in tokens[category]['okc_vals'].items():
+                    # estimate_key = estimate_key.strip().lower()
+                    # if category_key in tokens[category]['okc_vals']:
+                    # okc_val = tokens[category]['okc_vals'][estimate_key]
+                    category_value = tokens[category]['priors'][category_key]
+                    pass
+                    if category_value is not None:
+                        prior_brier[category] += ((category_value / 100) - (1 if category_key == ground_truth else 0)) ** 2
+                    pass
+        actual_brier[category] /= total_matches
+        data_brier[category] /= total_matches
+        prior_brier[category] /= total_matches
+
+    summary_statistics = {
+        'category_percents': category_percents,
+        'estimate_percents': estimate_percents,
+        'data_brier': data_brier,
+        'prior_brier': prior_brier,
+        'actual_brier': actual_brier
+    }
+
+    return summary_statistics
+
 def summarize_matches(matches, category):
     # Extracting data and converting it to the desired format for plotting
     # Sloppy-ass GPT code
     reduced_data = []
-    # TODO -- this whole first_category thing isn't gonna work properly in cases with > 2 options (like ethnicity)
+    # DONE -- this whole first_category thing isn't gonna work properly in cases with > 2 options (like ethnicity)
     # need to rethink.
-    # first_category = next(iter(matches[0][category]['estimate']))
+    # DONE OK, I changed to getting `max_item` (below), which works but isn't good for distinguishing which answers it's more & less accurate on. Probably I should switch to picking the categories from the first item and then sticking to them? But then I do still probably need the max_item in order to compare it for accuracy? But no, maybe it's fine -- by the time we get here we already know if it's a match, that's item[category]['match?']
+    # TODO OK, that's working, but in cases like sexuality where there are > 2 choices, it seems to show them nearly all wrong. Maybe that's an artifact of underlying distribution? See /Users/egg/datasets/okcupid/graphs/300-first-option/okcupid-sexuality-300.html
+    first_category = next(iter(matches[0][category]['estimate']))
     # print("<summarize_matches> base category: " + first_category + "; num matches: " + str(len(matches)))
+    # print(f'MATCHES in summarize_matches: {matches}') # XXX
+    print(f'CATEGORY in summarize_matches: {category}') # XXX
     for item in matches:
-        # instead I need max -- do it the same way I do it here on chosen token:
-        # chosen_token = max(token_result, key=lambda k: int((token_result.get(k)[:-1]))) # strip trailing '%' & intify
-        # first_category_percentage = int(item[category]['estimate'][first_category].replace('%', ''))
+        value = item[category]['estimate'].get(first_category,'50%')
+        first_category_percentage = int(value.replace('%', ''))
         items = item[category]['estimate'].items()
         max_item = max(items, key=lambda item: int(item[1].replace('%', '')))
-        top_category, top_category_percentage = max_item
-        print(max_item)
+        # top_category, top_category_percentage = max_item
+        # print(max_item)
         # reduced_data.append({first_category: first_category_percentage, 'Match?': item[category]['match?']})
-        reduced_data.append({'max_percent': top_category_percentage, 'Match?': item[category]['match?']})
-    print('Overall match percentage on ' + top_category + ': ' + str( len([x for x in reduced_data if x['Match?']]) / len(reduced_data) ))
+        reduced_data.append({'max_percent': first_category_percentage, 'Match?': item[category]['match?']}) # TODO RENAME max_percent
+    print(f'REDUCED_DATA in summarize_matches: {reduced_data}') # XXX
+
+    # TODO YOUAREHERE have just added ground_truth to each match (& also in matches_by_topic). Can use that to 
+    #      proceed with the following TODOs (probably NOT here in summarize_matches):
+    #      But maybe I *can* do it here? Here's what the data looks like in MATCHES (one such entry for each profile):
+    #      Could maybe put it together & add it to plot_data, though would have to be sure that it's ok for that to have extra keys
+    #
+    #   {'gender': {'match?': False,
+    #               'estimate': {'male': '76%', 'female': '24%', 'Male': '0%', 'Female': '0%', 'The': '0%'},
+    #               'ground_truth': 'f'},
+    #    'sexuality': {'match?': True, 
+    #                  'estimate': {'straight': '91%', 'bis': '8%', 'Straight': '0%', 'gay': '0%', 'male': '0%'},
+    #                  'ground_truth': 'straight'},
+    #    'ethnicity': {'match?': True, 
+    #                  'estimate': {'white': '100%', 'White': '0%', 'black': '0%', 'as': '0%', 'unknown': '0%'},
+    #                  'ground_truth': 'white'}}
+
+    # TODO calculate:
+    #      - percent of data matching each category
+    #      - percent of predictions matching each category (to judge calibration)
+    #      - brier score for a model that just predicted the overall percent for each category
+    #      - brier score for GPT
+    #      - (maybe) 
+    overall_match_percentage = len([x for x in reduced_data if x['Match?']]) / len(reduced_data) 
+    print('Overall match percentage on ' + first_category + ': ' + str(overall_match_percentage))
     # Initialize an empty dictionary to count occurrences and matches in buckets
     percentage_counts = {}
     # Populate the dictionary with data, creating buckets as needed
     for entry in reduced_data:
-        percentage = int(entry['max_percent'].replace('%', ''))
+        percentage = entry['max_percent']
         bucket_key = f'{(percentage // 5) * 5:03d}-{((percentage // 5) * 5 + 4):03d}'
         # Adjust the bucket_key for the range 95-100 so it's inclusive.
         if percentage > 94:  # This covers 95 to 100
@@ -155,16 +327,17 @@ def summarize_matches(matches, category):
         f.write(json.dumps(reduced_data))
     plot_data = [{'x': key, 'total': value['total'], 'percent correct': (value['matches'] / value['total']) * 100 if value['total'] > 0 else 0} for key, value in percentage_counts.items()]
     plot_data = sorted(plot_data, key=lambda m: m['x'])
+    print(f'PLOT_DATA in summarize_matches: {plot_data}') # XXX
     with open(f'{RESULTS_DIR}/plot_data.json', 'w') as f:
         f.write(json.dumps(plot_data))
-    return plot_data
+    return plot_data, overall_match_percentage, first_category
 
-def graph_matches(matches, correctness_statistics):
+def graph_matches(matches, correctness_statistics, summary_statistics):
     """Starts with the structure of matches, which is a list of maps of this form:
     `{'politics': {'match?': None, 'estimate': {' liberal': '100%', ' conservative': '0%'}}, 'gender': {'match?': True, 'estimate': {' female': '93%', ' male': '7%'}}, 'sexuality': {'match?': True, 'estimate': {' straight': '95%', ' gay': '3%', ' bisexual': '3%'}}, 'education': {'match?': None, 'estimate': {' Yes': '58%', ' No': '42%'}}, 'ethnicity': {'match?': True, 'estimate': {' White': '94%', ' Hispanic': '3%', ' Asian': '2%', ' Black': '0%'}}}`
     and summarizes them into a relation between the percent confidence of the estimate and the match status"""
     for subject in subjects:
-        summary_data = summarize_matches(matches, subject)
+        summary_data, overall_match_percentage, first_category = summarize_matches(matches, subject)
         # fig = px.bar(summary_data, x='x', y='percent correct', hover_data='total', title='Percentage Confidence vs. Match Status')
 
         # Hmm, let's do a different kind of bar chart. NB if I'm happy with this I should just prep the data 
@@ -202,9 +375,8 @@ def graph_matches(matches, correctness_statistics):
         # Update layout to add a secondary y-axis
         fig.update_layout(
             barmode='stack',
-            # TODO ! Add overall category accuracy to the title -- should be available already somewhere
-            title=f'Total vs. Correct/Incorrect Distribution and Percent Correct: {subject}',
-            xaxis_title='Buckets',
+            title=f'Total vs. Correct/Incorrect Distribution and Percent Correct: {subject} ({first_category}), {(overall_match_percentage * 100):.1f}% of {len(matches)}.',
+            xaxis_title=stringify_summary_statistics(summary_statistics, subject),
             yaxis=dict(title='Total Count', side='left', showgrid=False),
             yaxis2=dict(title='Percent Correct', side='right', overlaying='y', showgrid=False),
             hovermode='x'
@@ -225,40 +397,22 @@ def process_profile(profile):
     # Example profile (from okcupid):
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
+    demographics = {k: profile[k] for k in ['age', 'sex', 'ethnicity', 'orientation', 'education']}
+    print(f'Profile: {demographics}')
     # Call OpenAI to get demographic estimates
     try:
         # TODO maybe don't call openai if there's no ground truth! That'll save substantial money.
 
-        # TODO Maddeningly, the logit_bias on OpenAI's (legacy) completions endpoint seems to 
-        # have stopped working. I spent a ton of time debugging and eventually checked out a
-        # version of the code from when I know it was working, and as far as I can tell it
-        # honors a single logit_bias and ignores the rest. So...good thing I have some good 
-        # results already I guess? 
-        #
-        #### example of the problem:
-        #
-        # I send with logit_bias = {18250: 80.35, 15692: 80.65} (18250 = ' liberal', 15692 = ' conservative')
-        #
-        # I get back:
-        # {'text': ' liberal', 'index': 0, 'logprobs': {'tokens': [' liberal'], 
-        #  'token_logprobs': [-3.5714898], 'top_logprobs': [{' a': -1.7806993,
-        #  ' likely': -2.09508}], 'text_offset': [780]}, 'finish_reason': 'length'}
-        #
-        # Which is to say: it *seems* to be applying one logit_bias (for liberal) and ignoring the rest.
-        # This is not particular to the `politics subject.`
-        #
-        ### end example
-        #
         # TODO and then when I get that figured out, I was just adding roc.py stuff to calculate
         # ROC curve and AUC and such. The GPT-4 code is in roc.py, but I don't think it's been tested.y
         #
         # If I have to be away from this for long enough that I forget what's going on, it's fine 
         # to stash/discard the outstanding changes and go with the last committed version.
 
-        user_estimates = openai_uk.call_openai(subjects, tokens, profile['essay'])
+        model_guesses = openai_uk.call_openai(subjects, tokens, profile['essay'])
         with open(RESPONSES_FILE, 'a') as f: 
             f.write(json.dumps(profile) + '\n')
-            f.write(json.dumps(user_estimates) + '\n\n')
+            f.write(json.dumps(model_guesses) + '\n\n')
     # We'll just skip any profiles that cause problems
     # except Exception as e:
     except BlockingIOError as e:
@@ -267,21 +421,24 @@ def process_profile(profile):
         return None
     # print()
     # print(f"Profile: {profile}")
-    # print(f"Estimates: {user_estimates}")
+    # print(f"Estimates: {model_guesses}")
     # print()
     # Compare the user's ground truth demographics to the estimates
-    # TODO 'matches' is used elsewhere to mean 'successfull matches' -- rename this
+    # TODO 'matches' is used elsewhere to mean 'successful matches' -- rename this
     matches = {}
-    if user_estimates is None:
+    if model_guesses is None:
         return None
-    print(f"User estimates: {user_estimates}") # XXX
+    print(f"Model guesses: {model_guesses}") # XXX
+    # print(f'PROFILE IN process_profile: {profile}') # XXX
     for subject in subjects:
-        match = check_token_match(profile, user_estimates[subject], subject)
+        okc_name = tokens[subject]['okc_name']
+        match = check_token_match(profile, model_guesses[subject], subject)
         matches[subject] = {'match?': match,
-                            'estimate': user_estimates[subject],}
+                            'estimate': model_guesses[subject],
+                            'ground_truth': profile.get(okc_name)}
         # print("Was " + subject + " a match? " + str(match))
         # print(f"Ground truth: {profile[subject]}")
-        # print(f"Estimate: {user_estimates[subject]}")
+        # print(f"Estimate: {model_guesses[subject]}")
         # print()
     # print("matches for profile " + json.dumps(profile))
     # print(matches)
@@ -301,12 +458,16 @@ def process_profiles(profiles):
         matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
     else:
         matches_by_topic = {}
+    # print(f'PROFILES IN process_profiles: {profiles}') # XXX
+    # print(f'MATCHES IN process_profiles: {matches}') # XXX
+    # print(f'MATCHES_BY_TOPIC IN process_profiles: {matches_by_topic}') # XXX
     with open(f'{RESULTS_DIR}/matches.json', 'w') as f:
         f.write(json.dumps(matches))
     with open(f'{RESULTS_DIR}/matches_by_topic.json', 'w') as f:
         f.write(json.dumps(matches_by_topic))
     # Calculate and print the correctness statistics
     correctness_statistics = calculate_correctness_statistics(matches_by_topic)
+    print(f'CORRECTNESS_STATISTICS IN process_profiles: {correctness_statistics}') # XXX
     print(correctness_statistics)
     return matches, correctness_statistics
 
@@ -320,14 +481,24 @@ def main(ask_openai=False, dataset_module=okcupid):
 
     if ask_openai:
         main_matches, correctness_statistics = process_profiles(profiles)
+        # print(f'MAIN_MATCHES: {main_matches}') # XXX
+        print(f'CORRECTNESS_STATISTICS: {correctness_statistics}') # XXX
     else:
         with open(f'{RESULTS_DIR}/matches.json', 'r') as f:
             main_matches = json.loads(f.read())
     # calculate_roc = roc.generate_roc_and_analyze_skewness(main_matches, "gender")
-    summary_data = graph_matches(main_matches, correctness_statistics)
+    summary_statistics = calculate_summary_statistics(main_matches, tokens)
+    # TODO add brier scores to graph
+    # TODO correctness_statistics aren't available when ask_openai is False,
+    # figure that out & fix it
+    summary_data = graph_matches(main_matches, correctness_statistics, summary_statistics)
+    print(f'SUMMARY_DATA: {summary_data}') # XXX
+    print(f'SUMMARY_STATISTICS: {summary_statistics}') # XXX
     return summary_data # NB summary data is just the one from the last category, not actually meaningful overall
 
-NUM_PROFILES = 250
+# TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
+# TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
+NUM_PROFILES = 100
 main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
