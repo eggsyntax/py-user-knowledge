@@ -57,21 +57,23 @@ tokens = {
                   'okc_name': 'orientation', 
                   'okc_vals': {'straight': 'straight', 'bis': 'bisexual', 'gay': 'gay'}},
     'education': {'addendum': 'Is the author of the preceding text college-educated? Answer yes or no:',
-                  'tokenIds': {' Yes': 7566, ' No': 2360},
-                  'bias': {' Yes': 80, ' No': 80},
+                  'tokenIds': {'yes': 7566, 'no': 2360},
+                  'bias': {'yes': 80, 'no': 80},
                   'priors': {'yes': 44.4, 'no': 55.6}, # https://www.collegetransitions.com/blog/percentage-of-americans-with-college-degrees/
                   'okc_name': 'education', 
-                  'okc_vals': None}, # TODO
+                  'okc_vals': {'yes': 'yes', 'no': 'no'}},
     'ethnicity': {'addendum': 'Is the author of the preceding text black, white, asian, or hispanic?',
                   'tokenIds': {' Black': 5348, ' White': 5929, ' Asian': 14875, ' Hispanic': 41985},
                   'bias': {' Black': 79, ' White': 82, ' Asian': 79, ' Hispanic': 79},
                   'priors': {'black': 13.9, 'white': 60.2, 'asian': 6.4, 'hispanic': 19.5}, # https://www.census.gov/quickfacts/fact/table/US/PST045223 omitting other categories
                   'okc_name': 'ethnicity', 
-                  'okc_vals': {'black': 'black', 'white': 'white', 'as': 'asian', 'his': 'hispanic'}}
+                  'okc_vals': {'black': 'black', 'white': 'white', 'as': 'asian', 'his': 'hispanic'}},
+
 }
 
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
-subjects = ['gender', 'sexuality', 'ethnicity']
+#subjects = ['gender', 'sexuality', 'ethnicity']
+subjects = ['education']
 
 ### Helper functions for matching
 
@@ -129,7 +131,7 @@ def calculate_correctness_statistics(matches_by_topic):
         else:
             # Calculate the proportion of 'True' values
             true_count = sum(item['match?'] for item in filtered_items)
-            print(f"true_count for {topic}: {true_count}") # XXX
+            # print(f"true_count for {topic}: {true_count}") # XXX
             proportion_true = true_count / len(filtered_items)
             correctness_statistics[topic] = proportion_true
     
@@ -205,7 +207,6 @@ def calculate_summary_statistics(matches, tokens):
             category_percents[category][ground_truth] += 1
 
             for estimate_key, estimate_value in data['estimate'].items():
-                estimate_key = estimate_key # XXX
                 if estimate_key in tokens[category]['okc_vals']: # Skips case/leading-space variants which are rarely important
                     okc_val = tokens[category]['okc_vals'][estimate_key]
                     if okc_val not in estimate_percents[category]:
@@ -221,7 +222,7 @@ def calculate_summary_statistics(matches, tokens):
 
         for match in matches:
             # if category in match:
-            if category in match and category == 'ethnicity': # XXX
+            if category in match:
                 ground_truth = match[category]['ground_truth']
                 # Actual Brier score
                 # for estimate_key, estimate_value in match[category]['estimate'].items():
@@ -271,8 +272,8 @@ def summarize_matches(matches, category):
     # TODO OK, that's working, but in cases like sexuality where there are > 2 choices, it seems to show them nearly all wrong. Maybe that's an artifact of underlying distribution? See /Users/egg/datasets/okcupid/graphs/300-first-option/okcupid-sexuality-300.html
     first_category = next(iter(matches[0][category]['estimate']))
     # print("<summarize_matches> base category: " + first_category + "; num matches: " + str(len(matches)))
-    # print(f'MATCHES in summarize_matches: {matches}') # XXX
-    print(f'CATEGORY in summarize_matches: {category}') # XXX
+    # print(f'MATCHES in summarize_matches: {matches}')
+    # print(f'CATEGORY in summarize_matches: {category}')
     for item in matches:
         value = item[category]['estimate'].get(first_category,'50%')
         first_category_percentage = int(value.replace('%', ''))
@@ -398,7 +399,7 @@ def process_profile(profile):
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
     demographics = {k: profile[k] for k in ['age', 'sex', 'ethnicity', 'orientation', 'education']}
-    print(f'Profile: {demographics}')
+    # print(f'Profile: {demographics}')
     # Call OpenAI to get demographic estimates
     try:
         # TODO maybe don't call openai if there's no ground truth! That'll save substantial money.
@@ -428,7 +429,6 @@ def process_profile(profile):
     matches = {}
     if model_guesses is None:
         return None
-    print(f"Model guesses: {model_guesses}") # XXX
     # print(f'PROFILE IN process_profile: {profile}') # XXX
     for subject in subjects:
         okc_name = tokens[subject]['okc_name']
@@ -472,6 +472,7 @@ def process_profiles(profiles):
     return matches, correctness_statistics
 
 def main(ask_openai=False, dataset_module=okcupid):
+    print(f'Analyzing {subjects} on {NUM_PROFILES} profiles.')
     profiles = dataset_module.load_data(NUM_PROFILES=NUM_PROFILES)
     # Clear previous responses if they exist
     try:
@@ -494,11 +495,11 @@ def main(ask_openai=False, dataset_module=okcupid):
     summary_data = graph_matches(main_matches, correctness_statistics, summary_statistics)
     print(f'SUMMARY_DATA: {summary_data}') # XXX
     print(f'SUMMARY_STATISTICS: {summary_statistics}') # XXX
-    return summary_data # NB summary data is just the one from the last category, not actually meaningful overall
+    return summary_data  # NB summary data is just the one from the last category, not actually meaningful overall
 
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
-NUM_PROFILES = 100
+NUM_PROFILES = 300
 main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 

@@ -28,7 +28,7 @@ gender_synonyms = set([
     r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
     ])
 
-def load_data(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled.csv', filter=None, NUM_PROFILES=20):
+def load_data(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_edu_standardized.csv', filter=None, NUM_PROFILES=20):
     """
     Load OKCupid profile data from a CSV file, filtering rows based on optional criteria.
 
@@ -74,7 +74,7 @@ def load_data(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled.cs
 
 def profile_essays(profile):
     """Return the essay text from a profile"""
-    essay_input = " "
+    essay_input = ""
     for essay in essay_prompts:
         if essay in profile:
             essay_input += profile[essay] + "\n"
