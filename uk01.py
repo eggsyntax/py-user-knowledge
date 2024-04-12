@@ -68,12 +68,18 @@ tokens = {
                   'priors': {'black': 13.9, 'white': 60.2, 'asian': 6.4, 'hispanic': 19.5}, # https://www.census.gov/quickfacts/fact/table/US/PST045223 omitting other categories
                   'okc_name': 'ethnicity', 
                   'okc_vals': {'black': 'black', 'white': 'white', 'as': 'asian', 'his': 'hispanic'}},
+    'age': {'addendum': 'Is the author of the preceding text older than 30? Answer yes or no:', 
+            'tokenIds': {'yes': 7566, 'no': 2360},
+            'bias': {'yes': 80, 'no': 80},
+            'priors': {'yes': 46.8, 'no': 53.2}, # Going with the data prior here, it's pretty hard to know what the actual distribution on a dating site is
+            'okc_name': 'age', 
+            'okc_vals': {'yes': 'yes', 'no': 'no'}},
 
 }
 
-# subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity']
+# subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
 #subjects = ['gender', 'sexuality', 'ethnicity']
-subjects = ['education']
+subjects = ['age']
 
 ### Helper functions for matching
 
@@ -91,6 +97,7 @@ def check_token_match(profile, token_result, subject):
     if profile_value is None or token_result is None:
         return None
     
+    # Just guess the most probable token
     chosen_token = max(token_result, key=lambda k: int((token_result.get(k)[:-1]))) # strip trailing '%' & intify
     # print('chosen_token: ' + chosen_token) # XXX
     try:
@@ -398,7 +405,7 @@ def process_profile(profile):
     # Example profile (from okcupid):
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
-    demographics = {k: profile[k] for k in ['age', 'sex', 'ethnicity', 'orientation', 'education']}
+    demographics = {k: profile[k] for k in ['age', 'sex', 'ethnicity', 'orientation', 'education', 'age']}
     # print(f'Profile: {demographics}')
     # Call OpenAI to get demographic estimates
     try:
@@ -499,7 +506,7 @@ def main(ask_openai=False, dataset_module=okcupid):
 
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
-NUM_PROFILES = 300
+NUM_PROFILES = 100
 main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 

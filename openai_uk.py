@@ -141,6 +141,41 @@ def get_prompt(message, subject, addendum):
           "content": f"""'''{message}''' \n{addendum}"""
         },
       ],
+      'age': [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant who helps determine information about the author of texts. You only ever answer with a single word: one of the exact choices the user provides."
+        },
+        {
+          "role": "user",
+          "content": f"""'''i was born in kiev, ukraine. i am very lucky that my family decided to get out of the former soviet union, as we had little opportunities there. in 1989, we immigrated to us and san francisco became my second home. i went to school in dallas, tx where i spent 5 years studying music and finance. i now work as an accountant during the day and as a music teacher/performer during evenings and weekends. i love life and open to any new experiences. i rarely get a chance to sit home because i am always rehearsing, walking the dog, working, going to art shows. i cook occasionally but what fun is it to cook for yourself? i tend to pick up on the go and move on to a more intellectual activity. i used to take dancing classes at the city college and i miss going to lindy in the park. i know there are tons of interesting people in san francisco and i am hoping to meet some of them.	living it the best i can.''' \n{addendum}"""
+        },
+        {
+          "role": "assistant",
+          "content": "yes"
+        },
+        {
+          "role": "user",
+          "content": f"""'''bay area native, recent ma resident, college grad, nerd, former copy editor, feminist, poor typist, dangerous amateur rapper	working, furnishing my apartment, settling in	making cereal	my sweet dance moves	books: opened ground -- seamus heaney; a farewell to arms -- ernest hemingway; the hawk in the rain -- ted hughes; buffett: the making of an american capitalist -- roger lowenstein  movies & tv shows, but i don't watch much...: cairo time, layer cake, parks & rec  music: beatles, daft punk, hird, michael jackson, plej, royksopp, sufjan stevens, stevie wonder, jay-z. i'm also listening to belle & sebastian and shad. i listen to one atb song -- the one with the lyric "i've been running like a sentence never begun." isn't that line amusing? let me know if you agree.  food: thai curry, burritos, rogan josh, chicken korma, shrimp and grits, avocado and whole-grain mustard open-faced sandwiches, ben & jerry's chunky monkey	1. my glasses 2. my contacts 3. sleep 4. tea -- darjeeling, english breakfast, and green; not so much a fan of the earl grey 5. (value) investing 6. excel shortcuts	running and how i'd like to do it more, philosophy (majored in it), investing (accurately representing returns on capital investments), obsolescence, written correspondence (style in letters), communication, people, should i go to grad school? (for what? what for?), "and me" vs. "and i" grammar	perhaps: sleeping reading with friends (maybe a party) at a bar	i've been to a small-town rodeo.	you're interested you're smart you wouldn't be more than friends without being friends also''' \n{addendum}"""
+        },
+        {
+          "role": "assistant",
+          "content": "no"
+        },
+        {
+          "role": "user",
+          "content": f"""'''i should probably change some aspects of this profile, now that i've moved from the west coast... midwesterner to the core, though sometimes mistaken for european because of my bass mumbling. raised catholic, but can pass as jewish. according to my tests, i'll die at 79 and i'm a democrat; i am a democrat, but i think i'll live forever.	must...finish...dissertation...	morning phone conversations and late-night tv marathons. dry delivery.	eyes, voice, walk.	pride and prejudice, brideshead revisited, angels in america. recently saw the secret of kells and it is awesome. currently following american horror story on tv and american office and charmed (yes, charmed) on netflix. scarlatti, kronos quartet, lady gaga. food-wise, i am really missing california.''' \n{addendum}"""
+        },
+        {
+          "role": "assistant",
+          "content": "yes"
+        },
+        {
+          "role": "user",
+          "content": f"""'''{message}''' \n{addendum}"""
+        },
+      ],
+
   }
   return prompt_messages[subject]
 
@@ -189,8 +224,8 @@ def call_openai(subjects, tokens, context_input):
             print(f"Context: {modified_context}")
             print(f"JSON data: {data}")
             return None
-        print('LOGPROBS') # TEMP
-        print(logprobs) # TEMP
+        # print('LOGPROBS') # TEMP
+        # print(logprobs) # TEMP
         probs = convert_log_probs_to_percentages(logprobs)
         # print(user_estimates)
         # print(probs) # TEMP
@@ -223,4 +258,3 @@ def map_token_id_to_bias(topic_info):
         bias = biases[token]
         tokenIdToBiasMap[tokenId] = bias
     return tokenIdToBiasMap
-
