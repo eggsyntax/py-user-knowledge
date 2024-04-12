@@ -79,7 +79,7 @@ tokens = {
 
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
 #subjects = ['gender', 'sexuality', 'ethnicity']
-subjects = ['age']
+subjects = ['sexuality']
 
 ### Helper functions for matching
 
@@ -107,26 +107,9 @@ def check_token_match(profile, token_result, subject):
         print(f"Ended up with a weird token result: {e}")
         return None
 
-
-# TODO am I using this?
-def split_to_match_and_estimate(matches):
-    """Given a list for a particular topic, split it into one for matches and one for estimates."""
-    # Example 'matches' list:
-    # [{'match?': True, 'estimate': {...}}, {'match?': True, 'estimate': {...}}, ...]
-    #
-    # Initialize two dictionaries to hold the separated data
-    match_map = {}
-    estimate_map = {}
-    # Iterate through each dictionary in the input list and populate the new maps
-    for index, item in enumerate(matches):
-        match_map[index] = item['match?']
-        estimate_map[index] = item['estimate']
-    return match_map, estimate_map
-
 def calculate_correctness_statistics(matches_by_topic):
     """Given a map of lists of matches and estimates, calculate the proportion for each topic where 'match?' == True."""
     correctness_statistics = {}
-    
     for topic, items in matches_by_topic.items():
         print(f"Calculating correctness statistics for {topic}...") # XXX
         # Eliminate error cases (where 'match?' is None)
@@ -237,7 +220,6 @@ def calculate_summary_statistics(matches, tokens):
                 for main_name, okc_name in tokens[category]['okc_vals'].items():
                     estimate_value = match[category]['estimate'].get(main_name)
                     if estimate_value is not None and main_name in tokens[category]['okc_vals']: # TODO second clause is unneeded
-                        # okc_val = tokens[category]['okc_vals'][okc_name]
                         actual_brier[category] += (float(estimate_value[:-1]) / 100 - 
                                                    (1 if okc_name == ground_truth else 0)) ** 2
                 # Data Brier score
@@ -306,13 +288,6 @@ def summarize_matches(matches, category):
     #    'ethnicity': {'match?': True, 
     #                  'estimate': {'white': '100%', 'White': '0%', 'black': '0%', 'as': '0%', 'unknown': '0%'},
     #                  'ground_truth': 'white'}}
-
-    # TODO calculate:
-    #      - percent of data matching each category
-    #      - percent of predictions matching each category (to judge calibration)
-    #      - brier score for a model that just predicted the overall percent for each category
-    #      - brier score for GPT
-    #      - (maybe) 
     overall_match_percentage = len([x for x in reduced_data if x['Match?']]) / len(reduced_data) 
     print('Overall match percentage on ' + first_category + ': ' + str(overall_match_percentage))
     # Initialize an empty dictionary to count occurrences and matches in buckets
@@ -395,7 +370,6 @@ def graph_matches(matches, correctness_statistics, summary_statistics):
                                 mode='lines+markers', name='Percent Correct', yaxis='y2', line=dict(color='#a59a52')))
 
         fig.show()
-    return summary_data # NB summary data is just the one from the last category
     
 ### Main profile processing
 
@@ -409,14 +383,8 @@ def process_profile(profile):
     # print(f'Profile: {demographics}')
     # Call OpenAI to get demographic estimates
     try:
-        # TODO maybe don't call openai if there's no ground truth! That'll save substantial money.
-
-        # TODO and then when I get that figured out, I was just adding roc.py stuff to calculate
-        # ROC curve and AUC and such. The GPT-4 code is in roc.py, but I don't think it's been tested.y
-        #
-        # If I have to be away from this for long enough that I forget what's going on, it's fine 
-        # to stash/discard the outstanding changes and go with the last committed version.
-
+        # TODO I started adding roc.py stuff to calculate ROC curve and AUC and such. 
+        # The GPT-4 code is in roc.py, but I don't think it's been tested.
         model_guesses = openai_uk.call_openai(subjects, tokens, profile['essay'])
         with open(RESPONSES_FILE, 'a') as f: 
             f.write(json.dumps(profile) + '\n')
@@ -433,23 +401,23 @@ def process_profile(profile):
     # print()
     # Compare the user's ground truth demographics to the estimates
     # TODO 'matches' is used elsewhere to mean 'successful matches' -- rename this
-    matches = {}
+    all_matches = {}
     if model_guesses is None:
         return None
     # print(f'PROFILE IN process_profile: {profile}') # XXX
     for subject in subjects:
         okc_name = tokens[subject]['okc_name']
         match = check_token_match(profile, model_guesses[subject], subject)
-        matches[subject] = {'match?': match,
-                            'estimate': model_guesses[subject],
-                            'ground_truth': profile.get(okc_name)}
+        all_matches[subject] = {'match?': match, 
+                                'estimate': model_guesses[subject], 
+                                'ground_truth': profile.get(okc_name)}
         # print("Was " + subject + " a match? " + str(match))
         # print(f"Ground truth: {profile[subject]}")
         # print(f"Estimate: {model_guesses[subject]}")
         # print()
-    # print("matches for profile " + json.dumps(profile))
-    # print(matches)
-    return matches
+    # print("all_matches for profile " + json.dumps(profile))
+    # print(all_matches)
+    return all_matches
 
 def process_profiles(profiles):
     print('Getting estimates from OpenAI...')
@@ -476,6 +444,8 @@ def process_profiles(profiles):
     correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     print(f'CORRECTNESS_STATISTICS IN process_profiles: {correctness_statistics}') # XXX
     print(correctness_statistics)
+    # TODO note that correctness_statistics DOESN'T contain the 'estimate' values which I need for Briers
+    # But 'matches' does, becomes 'main_matches' in containing fn (main)
     return matches, correctness_statistics
 
 def main(ask_openai=False, dataset_module=okcupid):
@@ -496,25 +466,20 @@ def main(ask_openai=False, dataset_module=okcupid):
             main_matches = json.loads(f.read())
     # calculate_roc = roc.generate_roc_and_analyze_skewness(main_matches, "gender")
     summary_statistics = calculate_summary_statistics(main_matches, tokens)
-    # TODO add brier scores to graph
     # TODO correctness_statistics aren't available when ask_openai is False,
-    # figure that out & fix it
-    summary_data = graph_matches(main_matches, correctness_statistics, summary_statistics)
-    print(f'SUMMARY_DATA: {summary_data}') # XXX
+    # figure that out & fix it 
+    graph_matches(main_matches, correctness_statistics, summary_statistics)
     print(f'SUMMARY_STATISTICS: {summary_statistics}') # XXX
-    return summary_data  # NB summary data is just the one from the last category, not actually meaningful overall
 
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
-NUM_PROFILES = 100
+NUM_PROFILES = 1
 main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
 # - push some sharegpt data through
 # - measure accuracy as a function of essays_len
 # - try having gpt-4 create essays as a persona with specific demographics
-# - deal with education, age
 # - prune data in various ways (gender: done)
-# - calculate brier score along with basic correctness
 # - maybe experiment with open ended description of user
 pass
