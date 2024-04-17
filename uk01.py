@@ -1,7 +1,13 @@
+"""
+Main class for experiments on predicting user demographics in OKCupid and 
+Persuade (& in principle other datasets). Honestly this is very sloppy code.
+"""
+
 import copy
 import json
 import os
 
+import loss
 import okcupid
 import openai_uk
 import persuade
@@ -9,6 +15,7 @@ import roc
 import utils
 
 import numpy as np
+import plotly.figure_factory as ff
 import plotly.graph_objects as go
 
 ### Topic/token handling
@@ -77,10 +84,6 @@ tokens = {
 
 }
 
-# subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
-#subjects = ['gender', 'sexuality', 'ethnicity']
-subjects = ['sexuality']
-
 ### Helper functions for matching
 
 # Function to check whether a value in a profile matches a token result, eg whether 'gender' of ' male' / ' female' in the token results matches 'sex' of 'm' / 'f' in the profile
@@ -124,7 +127,6 @@ def calculate_correctness_statistics(matches_by_topic):
             # print(f"true_count for {topic}: {true_count}") # XXX
             proportion_true = true_count / len(filtered_items)
             correctness_statistics[topic] = proportion_true
-    
     return correctness_statistics
 
 ### Graphing 
@@ -146,7 +148,8 @@ def stringify_summary_statistics(summary_statistics, category):
     category_values = {
         'data_brier': None,
         'prior_brier': None,
-        'actual_brier': None
+        'actual_brier': None,
+        'ce_loss': None
     }
     # Iterate over each Brier score map and retrieve the value for the specified category
     for key in category_values.keys():
@@ -157,7 +160,7 @@ def stringify_summary_statistics(summary_statistics, category):
             # Handle the case where the category is not present in the current Brier score map
             category_values[key] = 'N/A'
     # Format the results into a string
-    result_str = f"data_brier: {category_values['data_brier']}, prior_brier: {category_values['prior_brier']}, actual_brier: {category_values['actual_brier']}"
+    result_str = f"data_brier: {category_values['data_brier']}, prior_brier: {category_values['prior_brier']}, actual_brier: {category_values['actual_brier']}, ce_loss: {category_values['ce_loss']}"
     return result_str
 
 def calculate_summary_statistics(matches, tokens):
@@ -176,6 +179,8 @@ def calculate_summary_statistics(matches, tokens):
     data_brier = {} # Brier score for a model that just predicted the overall percent in the data sample (somewhat unfair advantage)
     prior_brier = {} # Brier score for a model that just predicted the overall percent in the population
     actual_brier = {} # Brier score for GPT
+    ce_loss = {} # Cross-entropy loss 
+    confusion_matrix = {}
 
     for category in tokens:
         category_percents[category] = {}
@@ -183,12 +188,14 @@ def calculate_summary_statistics(matches, tokens):
         data_brier[category] = 0
         prior_brier[category] = 0
         actual_brier[category] = 0
+        ce_loss[category] = -1
 
     total_matches = len(matches)
 
     for match in matches:
         for category, data in match.items():
             if category not in tokens:
+                print(f"Category {category} not found in tokens?!?")
                 continue
 
             ground_truth = data['ground_truth']
@@ -241,12 +248,17 @@ def calculate_summary_statistics(matches, tokens):
         data_brier[category] /= total_matches
         prior_brier[category] /= total_matches
 
+        ce_loss[category] = loss.ce_loss(matches, tokens[category], category)
+        confusion_matrix[category] = loss.generate_confusion_matrix(matches, tokens[category], category)
+
     summary_statistics = {
         'category_percents': category_percents,
         'estimate_percents': estimate_percents,
         'data_brier': data_brier,
         'prior_brier': prior_brier,
-        'actual_brier': actual_brier
+        'actual_brier': actual_brier,
+        'ce_loss': ce_loss,
+        'confusion_matrix': confusion_matrix,
     }
 
     return summary_statistics
@@ -272,7 +284,7 @@ def summarize_matches(matches, category):
         # print(max_item)
         # reduced_data.append({first_category: first_category_percentage, 'Match?': item[category]['match?']})
         reduced_data.append({'max_percent': first_category_percentage, 'Match?': item[category]['match?']}) # TODO RENAME max_percent
-    print(f'REDUCED_DATA in summarize_matches: {reduced_data}') # XXX
+    # print(f'REDUCED_DATA in summarize_matches: {reduced_data}') # XXX
 
     # TODO YOUAREHERE have just added ground_truth to each match (& also in matches_by_topic). Can use that to 
     #      proceed with the following TODOs (probably NOT here in summarize_matches):
@@ -368,9 +380,21 @@ def graph_matches(matches, correctness_statistics, summary_statistics):
         # Add the line chart for 'percent correct' with the secondary y-axis
         fig.add_trace(go.Scatter(x=[item['x'] for item in summary_data], y=[item['percent correct'] for item in summary_data],
                                 mode='lines+markers', name='Percent Correct', yaxis='y2', line=dict(color='#a59a52')))
-
         fig.show()
     
+def graph_confusion_matrix(confusion_matrix):
+    for category in tokens:
+        matrix = confusion_matrix.get(category)
+        if matrix is None: 
+            continue
+        category_tokens = tokens[category]
+        classes = loss.get_classes(category_tokens, category)
+        if classes:
+            fig = ff.create_annotated_heatmap(matrix, x=classes, y=classes, colorscale='Viridis')
+            fig.update_layout(title=f'Confusion Matrix for {category}', xaxis_title='Predicted Label', yaxis_title='Actual Label')
+            fig.update_xaxes(side="bottom")  # Ensuring labels are at the bottom
+            fig.show()
+
 ### Main profile processing
 
 def process_profile(profile):
@@ -469,11 +493,17 @@ def main(ask_openai=False, dataset_module=okcupid):
     # TODO correctness_statistics aren't available when ask_openai is False,
     # figure that out & fix it 
     graph_matches(main_matches, correctness_statistics, summary_statistics)
+    graph_confusion_matrix(summary_statistics.get('confusion_matrix'))
     print(f'SUMMARY_STATISTICS: {summary_statistics}') # XXX
 
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
-NUM_PROFILES = 1
+# subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
+subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
+# subjects = ['gender', 'sexuality', 'ethnicity']
+# subjects = ['gender', 'sexuality']
+
+NUM_PROFILES = 100
 main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
@@ -481,5 +511,4 @@ main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
 # - measure accuracy as a function of essays_len
 # - try having gpt-4 create essays as a persona with specific demographics
 # - prune data in various ways (gender: done)
-# - maybe experiment with open ended description of user
-pass
+# - maybe experiment with open ended description of pass

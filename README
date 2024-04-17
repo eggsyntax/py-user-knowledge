@@ -1,0 +1,10 @@
+Series of experiments testing how well LLMs (mainly GPT-3.5) can predict 
+demographics from text (mainly OKCupid profiles).
+
+This is HORRIBLE CODE. This was my experiment with letting GPT-4 generate 
+most of the individual functions, and then it's just patches on patches 
+from there.
+
+Perhaps I will rewrite it if I get time.
+
+Caveat emptor.
