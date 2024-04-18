@@ -3,27 +3,33 @@ Main class for experiments on predicting user demographics in OKCupid and
 Persuade (& in principle other datasets). Honestly this is very sloppy code.
 """
 
-import copy
 import json
 import os
 
+import calibration
 import loss
 import okcupid
 import openai_uk
 import persuade
-import roc
 import utils
 
 import numpy as np
 import plotly.figure_factory as ff
 import plotly.graph_objects as go
 
+### Settings
+
+ASK_OPENAI = True # else load from latest file
+CALIBRATE = True 
+LOAD_CALIBRATION = False
+GRAPH = True # create main graphs
+CONFUSION_MATRIX = True
+
 ### Topic/token handling
 
 RESULTS_DIR = utils.results_dir()
 # RESULTS_DIR = 'results/2024-03-03_250'
 RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
-
 # Main results (ok cupid, fairly early on, replace these):
 
 # 1000 samples
@@ -43,6 +49,7 @@ RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
 #   - TODO if I want to be cool I should just combine eg ' male' 'male' ' Male' 'Male'. But maybe not necessary.
 # 
 
+calibrators = {}
 # Token conversion setup
 tokens = {
     'politics': {'addendum': 'Is the author of the preceding text liberal or conservative?',
@@ -81,7 +88,6 @@ tokens = {
             'priors': {'yes': 46.8, 'no': 53.2}, # Going with the data prior here, it's pretty hard to know what the actual distribution on a dating site is
             'okc_name': 'age', 
             'okc_vals': {'yes': 'yes', 'no': 'no'}},
-
 }
 
 ### Helper functions for matching
@@ -110,6 +116,8 @@ def check_token_match(profile, token_result, subject):
         print(f"Ended up with a weird token result: {e}")
         return None
 
+# metajump (like ace)
+
 def calculate_correctness_statistics(matches_by_topic):
     """Given a map of lists of matches and estimates, calculate the proportion for each topic where 'match?' == True."""
     correctness_statistics = {}
@@ -130,18 +138,6 @@ def calculate_correctness_statistics(matches_by_topic):
     return correctness_statistics
 
 ### Graphing 
-
-# def stringify_summary_statistics(data, subject):
-#     data = copy.deepcopy(data)
-#     data.pop('category_percents', None)
-#     data.pop('estimate_percents', None)
-#     for key in data:
-#         # Removing entries with 0 values and formatting numbers
-#         data[key] = {sub_key: f"{sub_value:.2f}" for sub_key, sub_value in data[key].items() if sub_value != 0}
-#     text = ''
-#     for key, value in data.items():
-#         text += f"{key}: {value}<br />"
-#     return str(data)
 
 def stringify_summary_statistics(summary_statistics, category):
     # Initialize a dictionary to hold the values for the category from each Brier score map
@@ -222,8 +218,6 @@ def calculate_summary_statistics(matches, tokens):
             if category in match:
                 ground_truth = match[category]['ground_truth']
                 # Actual Brier score
-                # for estimate_key, estimate_value in match[category]['estimate'].items():
-                # TODO maybe adopt these main_name, okc_name conventions for the other two loops
                 for main_name, okc_name in tokens[category]['okc_vals'].items():
                     estimate_value = match[category]['estimate'].get(main_name)
                     if estimate_value is not None and main_name in tokens[category]['okc_vals']: # TODO second clause is unneeded
@@ -285,21 +279,6 @@ def summarize_matches(matches, category):
         # reduced_data.append({first_category: first_category_percentage, 'Match?': item[category]['match?']})
         reduced_data.append({'max_percent': first_category_percentage, 'Match?': item[category]['match?']}) # TODO RENAME max_percent
     # print(f'REDUCED_DATA in summarize_matches: {reduced_data}') # XXX
-
-    # TODO YOUAREHERE have just added ground_truth to each match (& also in matches_by_topic). Can use that to 
-    #      proceed with the following TODOs (probably NOT here in summarize_matches):
-    #      But maybe I *can* do it here? Here's what the data looks like in MATCHES (one such entry for each profile):
-    #      Could maybe put it together & add it to plot_data, though would have to be sure that it's ok for that to have extra keys
-    #
-    #   {'gender': {'match?': False,
-    #               'estimate': {'male': '76%', 'female': '24%', 'Male': '0%', 'Female': '0%', 'The': '0%'},
-    #               'ground_truth': 'f'},
-    #    'sexuality': {'match?': True, 
-    #                  'estimate': {'straight': '91%', 'bis': '8%', 'Straight': '0%', 'gay': '0%', 'male': '0%'},
-    #                  'ground_truth': 'straight'},
-    #    'ethnicity': {'match?': True, 
-    #                  'estimate': {'white': '100%', 'White': '0%', 'black': '0%', 'as': '0%', 'unknown': '0%'},
-    #                  'ground_truth': 'white'}}
     overall_match_percentage = len([x for x in reduced_data if x['Match?']]) / len(reduced_data) 
     print('Overall match percentage on ' + first_category + ': ' + str(overall_match_percentage))
     # Initialize an empty dictionary to count occurrences and matches in buckets
@@ -391,11 +370,18 @@ def graph_confusion_matrix(confusion_matrix):
         classes = loss.get_classes(category_tokens, category)
         if classes:
             fig = ff.create_annotated_heatmap(matrix, x=classes, y=classes, colorscale='Viridis')
-            fig.update_layout(title=f'Confusion Matrix for {category}', xaxis_title='Predicted Label', yaxis_title='Actual Label')
+            addendum = category_tokens.get('addendum')
+            fig.update_layout(title=f'Confusion Matrix for {category}: {addendum}', xaxis_title='Predicted Label', yaxis_title='Actual Label')
             fig.update_xaxes(side="bottom")  # Ensuring labels are at the bottom
             fig.show()
 
 ### Main profile processing
+
+def matches_to_matches_by_topic(matches):
+    if matches:
+        return {key: [d[key] for d in matches] for key in matches[0]}
+    else:
+        return {}
 
 def process_profile(profile):
     """process a single profile, sending the essay questions to OpenAI and 
@@ -453,10 +439,19 @@ def process_profiles(profiles):
             matches.append(match)
             if len(matches) % 20 == 0:
                 print(f"Processed {len(matches)} profiles")
-    if matches:
-        matches_by_topic = {key: [d[key] for d in matches] for key in matches[0]}
-    else:
-        matches_by_topic = {}
+    # Calibrate results
+    # TODO YOUAREHERE -- This should be close-ish to working. The main remaining issue 
+    # is that it's creating calibrators per category, and the resulting calibrated 
+    # probabilities need to be used to build a new 'matches' structure.
+    for category in tokens:
+        print(f'Calibrating {category}')
+        if not matches:
+            continue
+        category_tokens = tokens[category]
+        ground_truth, munged_matches = loss.np_arrays(matches, category_tokens, category)
+        calibrator = calibration.fitted_isotonic_calibrator(ground_truth, munged_matches)
+        calibrators[category] = calibrator
+    matches_by_topic = matches_to_matches_by_topic(matches)
     # print(f'PROFILES IN process_profiles: {profiles}') # XXX
     # print(f'MATCHES IN process_profiles: {matches}') # XXX
     # print(f'MATCHES_BY_TOPIC IN process_profiles: {matches_by_topic}') # XXX
@@ -468,19 +463,23 @@ def process_profiles(profiles):
     correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     print(f'CORRECTNESS_STATISTICS IN process_profiles: {correctness_statistics}') # XXX
     print(correctness_statistics)
-    # TODO note that correctness_statistics DOESN'T contain the 'estimate' values which I need for Briers
-    # But 'matches' does, becomes 'main_matches' in containing fn (main)
     return matches, correctness_statistics
 
 def main(ask_openai=False, dataset_module=okcupid):
     print(f'Analyzing {subjects} on {NUM_PROFILES} profiles.')
-    profiles = dataset_module.load_data(NUM_PROFILES=NUM_PROFILES)
+    offset = 2000 if CALIBRATE else 0
+    profiles = dataset_module.load_data(NUM_PROFILES=(NUM_PROFILES+offset))[offset:]
+
     # Clear previous responses if they exist
     try:
         os.remove(RESPONSES_FILE)
     except FileNotFoundError:
         pass
 
+    if LOAD_CALIBRATION and not CALIBRATE: # Can't calibrate on loaded calibration
+        for category in tokens:
+            file_path = calibration.get_file_path(RESULTS_DIR, category)
+            calibration[category] = calibration.IsotonicCalibrator.load(file_path)
     if ask_openai:
         main_matches, correctness_statistics = process_profiles(profiles)
         # print(f'MAIN_MATCHES: {main_matches}') # XXX
@@ -488,23 +487,24 @@ def main(ask_openai=False, dataset_module=okcupid):
     else:
         with open(f'{RESULTS_DIR}/matches.json', 'r') as f:
             main_matches = json.loads(f.read())
-    # calculate_roc = roc.generate_roc_and_analyze_skewness(main_matches, "gender")
+            matches_by_topic = matches_to_matches_by_topic(main_matches)
+            correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     summary_statistics = calculate_summary_statistics(main_matches, tokens)
-    # TODO correctness_statistics aren't available when ask_openai is False,
-    # figure that out & fix it 
-    graph_matches(main_matches, correctness_statistics, summary_statistics)
-    graph_confusion_matrix(summary_statistics.get('confusion_matrix'))
+    if GRAPH:
+        graph_matches(main_matches, correctness_statistics, summary_statistics)
+    if CONFUSION_MATRIX:
+        graph_confusion_matrix(summary_statistics.get('confusion_matrix'))
     print(f'SUMMARY_STATISTICS: {summary_statistics}') # XXX
 
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
-subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
+# subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
 # subjects = ['gender', 'sexuality', 'ethnicity']
-# subjects = ['gender', 'sexuality']
+subjects = ['gender', 'sexuality']
 
-NUM_PROFILES = 100
-main(ask_openai=True, dataset_module=okcupid) # persuade, okcupid
+NUM_PROFILES = 2
+main(ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
 # - push some sharegpt data through

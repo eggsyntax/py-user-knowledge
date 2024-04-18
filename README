@@ -5,6 +5,9 @@ This is HORRIBLE CODE. This was my experiment with letting GPT-4 generate
 most of the individual functions, and then it's just patches on patches 
 from there.
 
-Perhaps I will rewrite it if I get time.
+It suffers further from my initial naivete about typical ML conventions for 
+eg data representation, so I'm munging data back and forth in a bunch of places.
+
+Ideally I will rewrite it when I get time, but also when do I ever get time?
 
 Caveat emptor.

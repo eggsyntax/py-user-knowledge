@@ -20,7 +20,7 @@ def np_arrays(guesses, category_tokens, category):
         if not current_ground_truth:
             continue
         current_guesses = [(float(guess.get(category, {}).get('estimate').get(clas, '0%')[:-1]) / 100) for clas in classes]
-        print(f'Guesses: {current_guesses}. {current_ground_truth}') # XXX
+        # print(f'Guesses: {current_guesses}. {current_ground_truth}') # XXX
         ground_truth.append([1 if okc_vals.get(clas) == current_ground_truth else 0 for clas in classes])
         munged_guesses.append(current_guesses)
     if len(munged_guesses) == 0:
@@ -43,8 +43,11 @@ def ce_loss(guesses, category_tokens, category):
 def generate_confusion_matrix(guesses, category_tokens, category):
     # Using the np_arrays function to obtain predictions and ground truth
     ground_truth, munged_guesses = np_arrays(guesses, category_tokens, category)
-    if ground_truth is None or munged_guesses is None:
-        print("Failed to process data for the category.")
+    if ground_truth is None:
+        print(f"No ground truth for category {category}.")
+        return None
+    if munged_guesses is None:
+        print(f"Couldn't create munged_guesses for category {category}.")
         return None
     # Find the index of the maximum prediction probability for each case
     predicted_classes = np.argmax(munged_guesses, axis=1)
