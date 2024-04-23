@@ -11,3 +11,7 @@ eg data representation, so I'm munging data back and forth in a bunch of places.
 Ideally I will rewrite it when I get time, but also when do I ever get time?
 
 Caveat emptor.
+
+Note that despite using temperature=0, the probability distribution predicted 
+by GPT will vary somewhat between runs, so results will differ, typically not 
+by very much.

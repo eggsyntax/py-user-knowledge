@@ -28,7 +28,8 @@ gender_synonyms = set([
     r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
     ])
 
-def load_data(categories, tokens, filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_edu_age.csv', filter=None, NUM_PROFILES=20, offset=0):
+def load_data(categories, tokens, filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_edu_age.csv', 
+              filter=None, NUM_PROFILES=20, offset=0, save_results=False):
     """
     Load OKCupid profile data from a CSV file, filtering rows based on optional criteria.
 
@@ -66,10 +67,11 @@ def load_data(categories, tokens, filename='/Users/egg/datasets/okcupid/okcupid_
     # Prune
 
     valid_profiles, invalid_profiles = prune_profiles(profiles, categories, tokens, NUM_PROFILES, offset)
-    with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
-        f.write(json.dumps(valid_profiles))
-    with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
-        f.write(json.dumps(invalid_profiles))
+    if save_results:
+        with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
+            f.write(json.dumps(valid_profiles))
+        with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
+            f.write(json.dumps(invalid_profiles))
     return valid_profiles
 
 def profile_essays(profile):

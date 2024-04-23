@@ -498,7 +498,7 @@ def process_profiles(profiles):
 def main(subjects, ask_openai=False, dataset_module=okcupid):
     print(f'Analyzing {subjects} on {NUM_PROFILES} profiles.')
     offset = 2000 if CREATE_CALIBRATION else 0
-    profiles = dataset_module.load_data(subjects, tokens=tokens, NUM_PROFILES=NUM_PROFILES, offset=offset)
+    profiles = dataset_module.load_data(subjects, tokens=tokens, NUM_PROFILES=NUM_PROFILES, offset=offset, save_results=SAVE_RESULTS)
 
     # Clear previous responses if they exist
     try:
@@ -517,7 +517,10 @@ def main(subjects, ask_openai=False, dataset_module=okcupid):
         print(f'CORRECTNESS_STATISTICS: {correctness_statistics}') # XXX
     else:
         with open(f'{RESULTS_DIR}/matches.json', 'r') as f:
-            main_matches = json.loads(f.read())
+            main_matches = json.loads(f.read())[:NUM_PROFILES]
+            if len(main_matches) < NUM_PROFILES:
+                print(f'Only {len(main_matches)} valid profiles in save file, unable to process the requested {NUM_PROFILES}. Exiting.')
+                exit()
             matches_by_topic = matches_to_matches_by_topic(main_matches)
             correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     summary_statistics = calculate_summary_statistics(main_matches, tokens)
@@ -534,7 +537,7 @@ subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
 # subjects = ['gender', 'sexuality', 'ethnicity']
 # subjects = ['ethnicity']
 
-NUM_PROFILES = 3
+NUM_PROFILES = 20
 main(subjects, ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 

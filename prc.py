@@ -13,6 +13,8 @@ def plot_prc_and_calculate_auprc_arrays(y_true, y_scores, classes, category):
     # Plot setup
     fig = go.Figure()
     
+    weighted_auprc = 0.0
+
     # Calculate PRC and AUPRC for each class
     for i, clas in enumerate(classes):
 
@@ -32,11 +34,13 @@ def plot_prc_and_calculate_auprc_arrays(y_true, y_scores, classes, category):
         # Using average_precision_score over auc based on https://towardsdatascience.com/the-wrong-and-right-way-to-approximate-area-under-precision-recall-curve-auprc-8fd9ca409064
         auprc = average_precision_score(true_binary, scores)
         
+        weighted_auprc += baseline * auprc
+
         # Add trace for each class
         fig.add_trace(go.Scatter(x=recall, y=precision, mode='lines', name=f'Class {clas} AUPRC: {auprc:.2f} (Baseline: {baseline:.2f})'))
     
     # Finalizing the plot
-    fig.update_layout(title=f'Precision-Recall Curve: {category} ({len(y_scores)} profiles).',
+    fig.update_layout(title=f'Precision-Recall Curve: {category} ({len(y_scores)} profiles). Weighted AUPRC = {weighted_auprc:.2f}',
                       xaxis_title='Recall',
                       yaxis_title='Precision',
                       yaxis=dict(scaleanchor="x", scaleratio=1),
@@ -60,8 +64,8 @@ def plot_prc_and_calculate_auprc(matches, category_tokens, category):
     
 
 # Example data
-y_true = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0]])
-y_scores = np.array([[0.7 , 0.15, 0.15], [0.2, 0.2, 0.6 ], [0.25, 0.25, 0.5 ], [0.65, 0.2 , 0.15], [0.15, 0.7 , 0.15], [0.1 , 0.2 , 0.7 ], [0.8 , 0.1 , 0.1 ], [0.25, 0.5 , 0.25]])
-category_tokens = ['bis', 'gay', 'straight']
+# y_true = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 0, 0], [0, 1, 0]])
+# y_scores = np.array([[0.7 , 0.15, 0.15], [0.2, 0.2, 0.6 ], [0.25, 0.25, 0.5 ], [0.65, 0.2 , 0.15], [0.15, 0.7 , 0.15], [0.1 , 0.2 , 0.7 ], [0.8 , 0.1 , 0.1 ], [0.25, 0.5 , 0.25]])
+# category_tokens = ['bis', 'gay', 'straight']
 
-plot_prc_and_calculate_auprc_arrays(y_true, y_scores, category_tokens, 'sexuality')
+# plot_prc_and_calculate_auprc_arrays(y_true, y_scores, category_tokens, 'sexuality')
