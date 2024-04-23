@@ -1,7 +1,6 @@
 import pickle 
-
+from pathlib import Path
 import numpy as np
-
 from sklearn.isotonic import IsotonicRegression
 
 class IsotonicCalibrator:
@@ -35,13 +34,19 @@ class IsotonicCalibrator:
         return calibrated_predictions
 
     def save(self, file_path):
+        # Create directory if needed
+        file = Path(file_path)
+        file.parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, 'wb') as file:
             pickle.dump(self, file)
 
     @staticmethod
     def load(file_path):
-        with open(file_path, 'rb') as file:
-            return pickle.load(file)
+        try:
+            with open(file_path, 'rb') as file:
+                return pickle.load(file)
+        except:
+            print(f"No saved calibrator at {file_path}")
 
 def fitted_isotonic_calibrator(ground_truth, guesses):
     """Fit an isotonic calibrator to the guesses."""

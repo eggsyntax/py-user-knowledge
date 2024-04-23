@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_classes(category_tokens, category):
+def get_classes(category_tokens, category='category'):
     """Get sorted class labels for this category."""
     okc_vals = category_tokens.get('okc_vals')
     if not okc_vals:

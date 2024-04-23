@@ -11,6 +11,7 @@ import loss
 import okcupid
 import openai_uk
 import persuade
+import prc
 import utils
 
 import numpy as np
@@ -19,39 +20,28 @@ import plotly.graph_objects as go
 
 ### Settings
 
-ASK_OPENAI = True # else load from latest file
-CALIBRATE = True 
-LOAD_CALIBRATION = False
+CREATE_CALIBRATION = False # create a new calibration
+USE_CALIBRATION = False # use the most recently generated calibration
 GRAPH = True # create main graphs
-CONFUSION_MATRIX = True
+CONFUSION_MATRIX = True # graph confusion matrices
+GRAPH_AUPRC = True
+# By default results (eg openai responses) overwrite previous run (if any) in today's data directory.
+# So if you do a big run and then small ones, it's useful to turn this off after the big one.
+SAVE_RESULTS = False
+ASK_OPENAI = False # else load from latest file
 
 ### Topic/token handling
 
 RESULTS_DIR = utils.results_dir()
 # RESULTS_DIR = 'results/2024-03-03_250'
 RESPONSES_FILE = f'{RESULTS_DIR}/openai_responses.json'
-# Main results (ok cupid, fairly early on, replace these):
 
-# 1000 samples
-# {'politics': n/a (no ground truth),
-#  'gender': 0.89,
-#  'sexuality': 0.84,
-#  'education': TODO (dataset uses a zillion categories),
-#  'ethnicity': 0.42
-#  }
-
-
-
-# TODO 
-# - change addendum to a question, see gender
-# - change okc_vals
-# - check for token ids, bias -- note that the tokens shouldn't be space-prefaced.
-#   - TODO if I want to be cool I should just combine eg ' male' 'male' ' Male' 'Male'. But maybe not necessary.
-# 
-
+# TODO be nice to have calibrators not be global
 calibrators = {}
 # Token conversion setup
 tokens = {
+    # Cautionary note: if you add a new category, ensure that the class labels and 
+    # okc_vals are in the same alphabetic order
     'politics': {'addendum': 'Is the author of the preceding text liberal or conservative?',
                  'tokenIds': {' liberal': 18250, ' conservative': 15692},
                  'bias': {' liberal': 80.35, ' conservative': 80.65},
@@ -107,7 +97,7 @@ def check_token_match(profile, token_result, subject):
         return None
     
     # Just guess the most probable token
-    chosen_token = max(token_result, key=lambda k: int((token_result.get(k)[:-1]))) # strip trailing '%' & intify
+    chosen_token = max(token_result, key=lambda k: utils.from_percent(token_result.get(k)))
     # print('chosen_token: ' + chosen_token) # XXX
     try:
         expected_profile_value = okc_vals[chosen_token]
@@ -177,6 +167,7 @@ def calculate_summary_statistics(matches, tokens):
     actual_brier = {} # Brier score for GPT
     ce_loss = {} # Cross-entropy loss 
     confusion_matrix = {}
+    auprc = {}
 
     for category in tokens:
         category_percents[category] = {}
@@ -185,6 +176,7 @@ def calculate_summary_statistics(matches, tokens):
         prior_brier[category] = 0
         actual_brier[category] = 0
         ce_loss[category] = -1
+        auprc[category] = -1
 
     total_matches = len(matches)
 
@@ -204,7 +196,7 @@ def calculate_summary_statistics(matches, tokens):
                     okc_val = tokens[category]['okc_vals'][estimate_key]
                     if okc_val not in estimate_percents[category]:
                         estimate_percents[category][okc_val] = 0
-                    estimate_percents[category][okc_val] += float(estimate_value[:-1]) / 100
+                    estimate_percents[category][okc_val] += utils.from_percent(estimate_value)
 
     for category in category_percents:
         for value in category_percents[category]:
@@ -220,8 +212,8 @@ def calculate_summary_statistics(matches, tokens):
                 # Actual Brier score
                 for main_name, okc_name in tokens[category]['okc_vals'].items():
                     estimate_value = match[category]['estimate'].get(main_name)
-                    if estimate_value is not None and main_name in tokens[category]['okc_vals']: # TODO second clause is unneeded
-                        actual_brier[category] += (float(estimate_value[:-1]) / 100 - 
+                    if estimate_value is not None and main_name in tokens[category]['okc_vals']:
+                        actual_brier[category] += (utils.from_percent(estimate_value) - 
                                                    (1 if okc_name == ground_truth else 0)) ** 2
                 # Data Brier score
                 for _, category_key in tokens[category]['okc_vals'].items():
@@ -244,6 +236,8 @@ def calculate_summary_statistics(matches, tokens):
 
         ce_loss[category] = loss.ce_loss(matches, tokens[category], category)
         confusion_matrix[category] = loss.generate_confusion_matrix(matches, tokens[category], category)
+        if GRAPH_AUPRC:
+            auprc[category] = prc.plot_prc_and_calculate_auprc(matches, tokens[category], category)
 
     summary_statistics = {
         'category_percents': category_percents,
@@ -261,10 +255,6 @@ def summarize_matches(matches, category):
     # Extracting data and converting it to the desired format for plotting
     # Sloppy-ass GPT code
     reduced_data = []
-    # DONE -- this whole first_category thing isn't gonna work properly in cases with > 2 options (like ethnicity)
-    # need to rethink.
-    # DONE OK, I changed to getting `max_item` (below), which works but isn't good for distinguishing which answers it's more & less accurate on. Probably I should switch to picking the categories from the first item and then sticking to them? But then I do still probably need the max_item in order to compare it for accuracy? But no, maybe it's fine -- by the time we get here we already know if it's a match, that's item[category]['match?']
-    # TODO OK, that's working, but in cases like sexuality where there are > 2 choices, it seems to show them nearly all wrong. Maybe that's an artifact of underlying distribution? See /Users/egg/datasets/okcupid/graphs/300-first-option/okcupid-sexuality-300.html
     first_category = next(iter(matches[0][category]['estimate']))
     # print("<summarize_matches> base category: " + first_category + "; num matches: " + str(len(matches)))
     # print(f'MATCHES in summarize_matches: {matches}')
@@ -274,10 +264,7 @@ def summarize_matches(matches, category):
         first_category_percentage = int(value.replace('%', ''))
         items = item[category]['estimate'].items()
         max_item = max(items, key=lambda item: int(item[1].replace('%', '')))
-        # top_category, top_category_percentage = max_item
-        # print(max_item)
-        # reduced_data.append({first_category: first_category_percentage, 'Match?': item[category]['match?']})
-        reduced_data.append({'max_percent': first_category_percentage, 'Match?': item[category]['match?']}) # TODO RENAME max_percent
+        reduced_data.append({'max_percent': first_category_percentage, 'Match?': item[category]['match?']})
     # print(f'REDUCED_DATA in summarize_matches: {reduced_data}') # XXX
     overall_match_percentage = len([x for x in reduced_data if x['Match?']]) / len(reduced_data) 
     print('Overall match percentage on ' + first_category + ': ' + str(overall_match_percentage))
@@ -297,13 +284,14 @@ def summarize_matches(matches, category):
             percentage_counts[bucket_key]['matches'] += 1
     print(f"<summarize_matches> reduced_data: {len(reduced_data)}, percentage_counts: {len(percentage_counts)}")
     # Transform the dictionary into the desired list of maps format
-    with open(f'{RESULTS_DIR}/reduced_data.json', 'w') as f:
-        f.write(json.dumps(reduced_data))
+    if SAVE_RESULTS:
+        with open(f'{RESULTS_DIR}/reduced_data.json', 'w') as f:
+            f.write(json.dumps(reduced_data))
     plot_data = [{'x': key, 'total': value['total'], 'percent correct': (value['matches'] / value['total']) * 100 if value['total'] > 0 else 0} for key, value in percentage_counts.items()]
     plot_data = sorted(plot_data, key=lambda m: m['x'])
-    print(f'PLOT_DATA in summarize_matches: {plot_data}') # XXX
-    with open(f'{RESULTS_DIR}/plot_data.json', 'w') as f:
-        f.write(json.dumps(plot_data))
+    if SAVE_RESULTS:
+        with open(f'{RESULTS_DIR}/plot_data.json', 'w') as f:
+            f.write(json.dumps(plot_data))
     return plot_data, overall_match_percentage, first_category
 
 def graph_matches(matches, correctness_statistics, summary_statistics):
@@ -349,7 +337,7 @@ def graph_matches(matches, correctness_statistics, summary_statistics):
         # Update layout to add a secondary y-axis
         fig.update_layout(
             barmode='stack',
-            title=f'Total vs. Correct/Incorrect Distribution and Percent Correct: {subject} ({first_category}), {(overall_match_percentage * 100):.1f}% of {len(matches)}.',
+            title=f'Total vs. Correct/Incorrect Distribution and Percent Correct: {subject} ({first_category}), {utils.to_percent(overall_match_percentage)} of {len(matches)}.',
             xaxis_title=stringify_summary_statistics(summary_statistics, subject),
             yaxis=dict(title='Total Count', side='left', showgrid=False),
             yaxis2=dict(title='Percent Correct', side='right', overlaying='y', showgrid=False),
@@ -360,7 +348,22 @@ def graph_matches(matches, correctness_statistics, summary_statistics):
         fig.add_trace(go.Scatter(x=[item['x'] for item in summary_data], y=[item['percent correct'] for item in summary_data],
                                 mode='lines+markers', name='Percent Correct', yaxis='y2', line=dict(color='#a59a52')))
         fig.show()
-    
+
+def confusion_metrics(cm):
+    # True Positives are on the diagonal
+    TP = np.diag(cm)
+    # False Positives
+    FP = np.sum(cm, axis=0) - TP
+    # False Negatives
+    FN = np.sum(cm, axis=1) - TP
+    # True Negatives
+    TN = np.sum(cm) - (FP + FN + TP)
+    # Precision, Recall, and Accuracy
+    precision = np.nan_to_num(TP / (TP + FP))
+    recall = np.nan_to_num(TP / (TP + FN))
+    accuracy = np.sum(TP) / np.sum(cm)
+    return precision, recall, accuracy
+
 def graph_confusion_matrix(confusion_matrix):
     for category in tokens:
         matrix = confusion_matrix.get(category)
@@ -369,9 +372,12 @@ def graph_confusion_matrix(confusion_matrix):
         category_tokens = tokens[category]
         classes = loss.get_classes(category_tokens, category)
         if classes:
+            precision, recall, accuracy = confusion_metrics(matrix)  # Calculate metrics from the confusion matrix
             fig = ff.create_annotated_heatmap(matrix, x=classes, y=classes, colorscale='Viridis')
             addendum = category_tokens.get('addendum')
-            fig.update_layout(title=f'Confusion Matrix for {category}: {addendum}', xaxis_title='Predicted Label', yaxis_title='Actual Label')
+            metrics_text = f'Precision: {np.mean(precision):.2f}, Recall: {np.mean(recall):.2f}, Accuracy: {accuracy:.2f}'
+            title = f'Confusion Matrix for {category} ({NUM_PROFILES}): {addendum}<br>{metrics_text}'
+            fig.update_layout(title=title, xaxis_title='Predicted Label', yaxis_title='Actual Label')
             fig.update_xaxes(side="bottom")  # Ensuring labels are at the bottom
             fig.show()
 
@@ -390,15 +396,13 @@ def process_profile(profile):
     # {'age': '22', 'status': 'single', 'sex': 'm', 'orientation': 'straight', 'education': 'working on college/university', 'ethnicity': 'asian, white', 'income': '-1', 'job': 'transportation', 'location': 'south san francisco,...california', 'essay0': 'about me:  i would l...tion span.', 'essay1': 'currently working as...zy sunday.', 'essay2': 'making people laugh....implicity.', 'essay3': 'the way i look. i am... blend in.', 'essay4': 'books: absurdistan, ... anything.', ...}
 
     demographics = {k: profile[k] for k in ['age', 'sex', 'ethnicity', 'orientation', 'education', 'age']}
-    # print(f'Profile: {demographics}')
     # Call OpenAI to get demographic estimates
     try:
-        # TODO I started adding roc.py stuff to calculate ROC curve and AUC and such. 
-        # The GPT-4 code is in roc.py, but I don't think it's been tested.
         model_guesses = openai_uk.call_openai(subjects, tokens, profile['essay'])
-        with open(RESPONSES_FILE, 'a') as f: 
-            f.write(json.dumps(profile) + '\n')
-            f.write(json.dumps(model_guesses) + '\n\n')
+        if SAVE_RESULTS:
+            with open(RESPONSES_FILE, 'a') as f: 
+                f.write(json.dumps(profile) + '\n')
+                f.write(json.dumps(model_guesses) + '\n\n')
     # We'll just skip any profiles that cause problems
     # except Exception as e:
     except BlockingIOError as e:
@@ -410,7 +414,6 @@ def process_profile(profile):
     # print(f"Estimates: {model_guesses}")
     # print()
     # Compare the user's ground truth demographics to the estimates
-    # TODO 'matches' is used elsewhere to mean 'successful matches' -- rename this
     all_matches = {}
     if model_guesses is None:
         return None
@@ -422,7 +425,7 @@ def process_profile(profile):
                                 'estimate': model_guesses[subject], 
                                 'ground_truth': profile.get(okc_name)}
         # print("Was " + subject + " a match? " + str(match))
-        # print(f"Ground truth: {profile[subject]}")
+        # print(f"Ground truth: {profile.get(okc_name)}")
         # print(f"Estimate: {model_guesses[subject]}")
         # print()
     # print("all_matches for profile " + json.dumps(profile))
@@ -439,36 +442,63 @@ def process_profiles(profiles):
             matches.append(match)
             if len(matches) % 20 == 0:
                 print(f"Processed {len(matches)} profiles")
-    # Calibrate results
-    # TODO YOUAREHERE -- This should be close-ish to working. The main remaining issue 
-    # is that it's creating calibrators per category, and the resulting calibrated 
-    # probabilities need to be used to build a new 'matches' structure.
-    for category in tokens:
-        print(f'Calibrating {category}')
-        if not matches:
-            continue
-        category_tokens = tokens[category]
-        ground_truth, munged_matches = loss.np_arrays(matches, category_tokens, category)
-        calibrator = calibration.fitted_isotonic_calibrator(ground_truth, munged_matches)
-        calibrators[category] = calibrator
+    # Calibration creation or use
+    if CREATE_CALIBRATION:
+        for category in tokens:
+            print(f'Creating calibration for {category}')
+            if not matches:
+                continue
+            category_tokens = tokens[category]
+            ground_truth, munged_matches = loss.np_arrays(matches, category_tokens, category)
+            if ground_truth is None:
+                continue
+            calibrator = calibration.fitted_isotonic_calibrator(ground_truth, munged_matches)
+            # calibrators[category] = calibrator # TODO delete, not used once we refuse to run a newly created calibrator
+            file_path = calibration.get_file_path(RESULTS_DIR, category)
+            calibrator.save(file_path)
+    elif USE_CALIBRATION:
+        for category in tokens:
+            print(f'Calibrating {category}')
+            if matches is None:
+                continue
+            category_tokens = tokens[category]
+            _, munged_matches = loss.np_arrays(matches, category_tokens, category)
+            if munged_matches is None:
+                continue
+            calibrator = calibrators[category]
+            if not calibrator:
+                print(f'No calibrator found for {category}')
+                continue
+            print(f'Original matches: {matches}')
+            print(f'Munged matches: {munged_matches}')
+            calibrated_matches = calibrator.calibrate(munged_matches)
+            sorted_classes = sorted(category_tokens['okc_vals'].keys())
+            print(f'Sorted classes: {sorted_classes}') # XXX
+            for i, calibrated_match in enumerate(calibrated_matches):
+                print(f'Current calibrated match: {calibrated_match}') # XXX
+                for j, label in enumerate(sorted_classes):
+                    print(f'Original match for {label}: {matches[i][category]['estimate'].get(label)}') # XXX
+                    print(f'Setting it to {utils.to_percent(calibrated_match[j])}') # XXX
+                    matches[i][category]['estimate'][label] = utils.to_percent(calibrated_match[j])
     matches_by_topic = matches_to_matches_by_topic(matches)
     # print(f'PROFILES IN process_profiles: {profiles}') # XXX
     # print(f'MATCHES IN process_profiles: {matches}') # XXX
     # print(f'MATCHES_BY_TOPIC IN process_profiles: {matches_by_topic}') # XXX
-    with open(f'{RESULTS_DIR}/matches.json', 'w') as f:
-        f.write(json.dumps(matches))
-    with open(f'{RESULTS_DIR}/matches_by_topic.json', 'w') as f:
-        f.write(json.dumps(matches_by_topic))
+    if SAVE_RESULTS:
+        with open(f'{RESULTS_DIR}/matches.json', 'w') as f:
+            f.write(json.dumps(matches))
+        with open(f'{RESULTS_DIR}/matches_by_topic.json', 'w') as f:
+            f.write(json.dumps(matches_by_topic))
     # Calculate and print the correctness statistics
     correctness_statistics = calculate_correctness_statistics(matches_by_topic)
     print(f'CORRECTNESS_STATISTICS IN process_profiles: {correctness_statistics}') # XXX
     print(correctness_statistics)
     return matches, correctness_statistics
 
-def main(ask_openai=False, dataset_module=okcupid):
+def main(subjects, ask_openai=False, dataset_module=okcupid):
     print(f'Analyzing {subjects} on {NUM_PROFILES} profiles.')
-    offset = 2000 if CALIBRATE else 0
-    profiles = dataset_module.load_data(NUM_PROFILES=(NUM_PROFILES+offset))[offset:]
+    offset = 2000 if CREATE_CALIBRATION else 0
+    profiles = dataset_module.load_data(subjects, tokens=tokens, NUM_PROFILES=NUM_PROFILES, offset=offset)
 
     # Clear previous responses if they exist
     try:
@@ -476,10 +506,11 @@ def main(ask_openai=False, dataset_module=okcupid):
     except FileNotFoundError:
         pass
 
-    if LOAD_CALIBRATION and not CALIBRATE: # Can't calibrate on loaded calibration
+    if USE_CALIBRATION and not CREATE_CALIBRATION: # Can't run a newly created calibration on the same data
         for category in tokens:
+            print(f'Loading calibration for {category}')
             file_path = calibration.get_file_path(RESULTS_DIR, category)
-            calibration[category] = calibration.IsotonicCalibrator.load(file_path)
+            calibrators[category] = calibration.IsotonicCalibrator.load(file_path)
     if ask_openai:
         main_matches, correctness_statistics = process_profiles(profiles)
         # print(f'MAIN_MATCHES: {main_matches}') # XXX
@@ -499,12 +530,12 @@ def main(ask_openai=False, dataset_module=okcupid):
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
-# subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
+subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
 # subjects = ['gender', 'sexuality', 'ethnicity']
-subjects = ['gender', 'sexuality']
+# subjects = ['ethnicity']
 
-NUM_PROFILES = 2
-main(ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
+NUM_PROFILES = 3
+main(subjects, ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
 # - push some sharegpt data through

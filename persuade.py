@@ -7,7 +7,7 @@ import utils
 
 RESULTS_DIR = utils.results_dir()
 
-def load_data(filename='/Users/egg/datasets/persuade-2/persuade_2.0_shuffled_12thgrade_remapped_to_match_okcupid.csv', filter=None, NUM_PROFILES=20):
+def load_data(categories, filename='/Users/egg/datasets/persuade-2/persuade_2.0_shuffled_12thgrade_remapped_to_match_okcupid.csv', filter=None, NUM_PROFILES=20):
     """
     Load persuade 2.0 profile data from a CSV file, filtering rows based on optional criteria.
 
