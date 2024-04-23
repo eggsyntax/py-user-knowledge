@@ -28,7 +28,7 @@ gender_synonyms = set([
     r'\bfemale\b', r'\bgirl\b', r'\bboy\b', r'\blady\b', r'\bdude\b'
     ])
 
-def load_data(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_edu_age.csv', filter=None, NUM_PROFILES=20):
+def load_data(categories, tokens, filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_edu_age.csv', filter=None, NUM_PROFILES=20, offset=0):
     """
     Load OKCupid profile data from a CSV file, filtering rows based on optional criteria.
 
@@ -65,7 +65,7 @@ def load_data(filename='/Users/egg/datasets/okcupid/okcupid_profiles_shuffled_ed
 
     # Prune
 
-    valid_profiles, invalid_profiles = prune_profiles(profiles, NUM_PROFILES)
+    valid_profiles, invalid_profiles = prune_profiles(profiles, categories, tokens, NUM_PROFILES, offset)
     with open(f'{RESULTS_DIR}/valid_profiles.json', 'w') as f:
         f.write(json.dumps(valid_profiles))
     with open(f'{RESULTS_DIR}/invalid_profiles.json', 'w') as f:
@@ -80,16 +80,15 @@ def profile_essays(profile):
             essay_input += profile[essay] + "\n"
     return essay_input
 
-def prune_profiles(profiles, NUM_PROFILES=20):
+def prune_profiles(profiles, categories, tokens, NUM_PROFILES=20, offset=0):
     """Remove profiles that include any of various synonyms for gender, or that just 
     have too little essay text to use."""
-    print('Pruning profiles...')
+    print(f'Pruning profiles, looking for {NUM_PROFILES} valid ones...')
     validish_profiles = []
     invalidish_profiles = []
-
-    for profile in profiles:
+    for profile in profiles[offset:]:
         # if the profile contains any of the words in gender_synonyms, print it and the relevant words:
-        # NOTE that this is wrong -- we only want to check the essy* fields, not the whole profile
+        # NOTE that this could be better -- we only want to check the essay* fields, not the whole profile
         is_invalid = False
         for key, value in profile.items():
             if any(re.search(word, str(value)) for word in gender_synonyms):
@@ -105,6 +104,19 @@ def prune_profiles(profiles, NUM_PROFILES=20):
             # print(f"Profile has too little text: {profile}")
             # print(f"Profile has too little text")
             is_invalid = True
+        # Some profiles (notably ethnicity) have a wide variety of values, some of which are 
+        # not included in our guesses, so we skip those. eg it'd be silly to have a category
+        # for 'hispanic / latin, white, other' even though that shows up in a profile
+        for category in categories:
+            known_values = tokens[category].get('okc_vals').values()
+            okc_name = tokens[category].get('okc_name')
+            profile_value = profile.get(okc_name)
+            if profile_value is None:
+                is_invalid = True
+                continue
+            if profile_value not in known_values:
+                is_invalid = True
+                continue
         if is_invalid:
             invalidish_profiles.append(profile)
         else:
