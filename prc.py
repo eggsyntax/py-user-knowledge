@@ -8,11 +8,12 @@ import plotly.graph_objects as go
 import loss
 
 def plot_prc_and_calculate_auprc_arrays(y_true, y_scores, classes, category):
-    """Inner fuction that takes nparrays and classes as input."""
+    """Inner function that takes nparrays and classes as input."""
 
     # Plot setup
     fig = go.Figure()
     
+    weighted_baseline = 0.0
     weighted_auprc = 0.0
 
     # Calculate PRC and AUPRC for each class
@@ -34,13 +35,14 @@ def plot_prc_and_calculate_auprc_arrays(y_true, y_scores, classes, category):
         # Using average_precision_score over auc based on https://towardsdatascience.com/the-wrong-and-right-way-to-approximate-area-under-precision-recall-curve-auprc-8fd9ca409064
         auprc = average_precision_score(true_binary, scores)
         
+        weighted_baseline += baseline * baseline
         weighted_auprc += baseline * auprc
 
         # Add trace for each class
         fig.add_trace(go.Scatter(x=recall, y=precision, mode='lines', name=f'Class {clas} AUPRC: {auprc:.2f} (Baseline: {baseline:.2f})'))
     
     # Finalizing the plot
-    fig.update_layout(title=f'Precision-Recall Curve: {category} ({len(y_scores)} profiles). Weighted AUPRC = {weighted_auprc:.2f}',
+    fig.update_layout(title=f'Precision-Recall Curve: {category} ({len(y_scores)} profiles).<br>Weighted AUPRC = {weighted_auprc:.2f}, weighted baseline = {weighted_baseline:.2f}',
                       xaxis_title='Recall',
                       yaxis_title='Precision',
                       yaxis=dict(scaleanchor="x", scaleratio=1),
