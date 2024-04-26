@@ -27,8 +27,8 @@ CONFUSION_MATRIX = True # graph confusion matrices
 GRAPH_AUPRC = True
 # By default results (eg openai responses) overwrite previous run (if any) in today's data directory.
 # So if you do a big run and then small ones, it's useful to turn this off after the big one.
-SAVE_RESULTS = False
-ASK_OPENAI = False # else load from latest file
+SAVE_RESULTS = True
+ASK_OPENAI = True # else load from latest file
 
 ### Topic/token handling
 
@@ -238,6 +238,7 @@ def calculate_summary_statistics(matches, tokens):
         confusion_matrix[category] = loss.generate_confusion_matrix(matches, tokens[category], category)
         if GRAPH_AUPRC:
             auprc[category] = prc.plot_prc_and_calculate_auprc(matches, tokens[category], category)
+            print(f"AUPRC for {category}: {auprc[category]}") # XXX
 
     summary_statistics = {
         'category_percents': category_percents,
@@ -247,6 +248,7 @@ def calculate_summary_statistics(matches, tokens):
         'actual_brier': actual_brier,
         'ce_loss': ce_loss,
         'confusion_matrix': confusion_matrix,
+        'auprc': auprc,
     }
 
     return summary_statistics
@@ -537,7 +539,7 @@ subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
 # subjects = ['gender', 'sexuality', 'ethnicity']
 # subjects = ['ethnicity']
 
-NUM_PROFILES = 20
+NUM_PROFILES = 10
 main(subjects, ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 

@@ -49,7 +49,7 @@ def plot_prc_and_calculate_auprc_arrays(y_true, y_scores, classes, category):
                       xaxis=dict(constrain='domain'),
                       width=700, height=500)
     fig.show()
-
+    return weighted_baseline, weighted_auprc
 
 def plot_prc_and_calculate_auprc(matches, category_tokens, category):
     """Plot the Precision-Recall Curve and calculate the Area Under the Precision-Recall Curve (AUPRC) for each class."""

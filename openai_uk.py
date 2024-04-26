@@ -186,8 +186,9 @@ def openai(message, addendum, subject, tokenIds={}):
     try:
         params = {
             'model': "gpt-3.5-turbo",
+            # 'model': "gpt-4-turbo-2024-04-09",
             'messages': messages,
-            # 'max_tokens': 1,
+            'max_tokens': 1,
             'logprobs': True,
             # 'logprobs': numTokens,
             'top_logprobs': 5,
