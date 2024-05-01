@@ -1,7 +1,13 @@
 Series of experiments testing how well LLMs (mainly GPT-3.5) can predict 
 demographics from text (mainly OKCupid profiles).
 
-This is HORRIBLE CODE. This was my experiment with letting GPT-4 generate 
+To run from the command line:
+- Install packages (untested as yet, please let me know if you encounter difficulties)
+  - Conda: `conda install --file conda_requirements.txt`
+  - Pip:   `pip install -r pip_requirements.txt`
+- `python test-demographics.py`
+
+NODE: this is HORRIBLE CODE. This was my experiment with letting GPT-4 generate 
 most of the individual functions, and then it's just patches on patches 
 from there.
 
@@ -13,5 +19,4 @@ Ideally I will rewrite it when I get time, but also when do I ever get time?
 Caveat emptor.
 
 Note that despite using temperature=0, the probability distribution predicted 
-by GPT will vary somewhat between runs, so results will differ, typically not 
-by very much.
+by GPT will vary somewhat between runs, so results will differ.

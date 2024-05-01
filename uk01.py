@@ -23,11 +23,11 @@ import plotly.graph_objects as go
 CREATE_CALIBRATION = False # create a new calibration
 USE_CALIBRATION = False # use the most recently generated calibration
 GRAPH = True # create main graphs
-CONFUSION_MATRIX = True # graph confusion matrices
+CONFUSION_MATRIX = False # graph confusion matrices
 GRAPH_AUPRC = True
 # By default results (eg openai responses) overwrite previous run (if any) in today's data directory.
 # So if you do a big run and then small ones, it's useful to turn this off after the big one.
-SAVE_RESULTS = True
+SAVE_RESULTS = False
 ASK_OPENAI = True # else load from latest file
 
 ### Topic/token handling
@@ -44,6 +44,7 @@ tokens = {
     # okc_vals are in the same alphabetic order
     'politics': {'addendum': 'Is the author of the preceding text liberal or conservative?',
                  'tokenIds': {' liberal': 18250, ' conservative': 15692},
+                 # NOTE: bias is no longer used post-API-change TODO remove
                  'bias': {' liberal': 80.35, ' conservative': 80.65},
                  'priors': {'liberal': 41, 'conservative': 59}, # https://news.gallup.com/poll/609914/women-become-liberal-men-mostly-stable.aspx, omitting 'moderate'
                  'okc_name': None,
@@ -535,12 +536,14 @@ def main(subjects, ask_openai=False, dataset_module=okcupid):
 # TODO calculate length (in chars) of combined essays, get an average across the profiles, and see how it correlates with accuracy
 # TODO in future can do this token-by-token on a single profile to see how accuracy changes per token
 # subjects = ['politics', 'gender', 'sexuality', 'education', 'ethnicity', 'age']
-subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
+# subjects = ['gender', 'sexuality', 'education', 'ethnicity', 'age']
 # subjects = ['gender', 'sexuality', 'ethnicity']
-# subjects = ['ethnicity']
+subjects = ['ethnicity']
 
-NUM_PROFILES = 10
-main(subjects, ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
+NUM_PROFILES = 1
+
+if __name__ == "__main__":
+    main(subjects, ask_openai=ASK_OPENAI, dataset_module=okcupid) # persuade, okcupid
 
 # TODO 
 # - push some sharegpt data through

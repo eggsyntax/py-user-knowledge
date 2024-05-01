@@ -4,4 +4,4 @@ __pycache__/
 # with `conda env export > conda_env.yml` and can be recreated
 # on other machines with `conda env create -f=conda_env.yml`.
 .conda/
-
+scratchpad.py
