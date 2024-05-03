@@ -182,7 +182,6 @@ def get_prompt(message, subject, addendum):
 def openai(message, addendum, subject, tokenIds={}): 
     numTokens = len(tokenIds) if tokenIds else 5
     messages = get_prompt(message, subject, addendum)
-
     try:
         params = {
             'model': "gpt-3.5-turbo",
@@ -222,12 +221,11 @@ def call_openai(subjects, tokens, context_input):
             logprobs = data['choices'][0]['logprobs']['content'][0]['top_logprobs']
         except KeyError as e:
             print(f"Error processing response: {e}")
-            print(f"Context: {modified_context}")
             print(f"JSON data: {data}")
             return None
         # print('LOGPROBS') # TEMP
         # print(logprobs) # TEMP
-        probs = convert_log_probs_to_percentages(logprobs)
+        probs = convert_log_probs_to_percentages(logprobs, list(tokens[subject]['okc_vals'].keys()))
         # print(user_estimates)
         # print(probs) # TEMP
         # print('probs') # TEMP
@@ -236,17 +234,18 @@ def call_openai(subjects, tokens, context_input):
     # print(user_estimates)
     return user_estimates
 
-def convert_log_probs_to_percentages(log_probs):
+def convert_log_probs_to_percentages(log_probs, valid_tokens):
     converted = {}
     for logprob in log_probs:
         token = logprob['token']
+        if token not in valid_tokens:
+            continue
         value = logprob['logprob']
-        # print("key:") # TEMP
-        # print(key) # TEMP
         prob = math.exp(value)
-        percentage = f"{prob * 100:.0f}%"
-        converted[token] = percentage
-    return converted
+        converted[token] = prob
+    # print(f"Total: {sum(converted.values())}")
+    percentages = {token: f"{prob * 100:.0f}%" for token, prob in converted.items()}
+    return percentages
 
 def map_token_id_to_bias(topic_info):
     """`topics` contains a map from option name to token ID, and another from option name to desired bias. 
