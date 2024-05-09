@@ -7,7 +7,7 @@ To run from the command line:
   - Pip:   `pip install -r pip_requirements.txt`
 - `python test-demographics.py`
 
-NODE: this is HORRIBLE CODE. This was my experiment with letting GPT-4 generate 
+NOTE: this is HORRIBLE CODE. This was my experiment with letting GPT-4 generate 
 most of the individual functions, and then it's just patches on patches 
 from there.
 
