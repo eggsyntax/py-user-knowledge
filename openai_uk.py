@@ -1,7 +1,10 @@
 import math
+import os
 import requests
 
 ### OpenAI requests & response handling
+
+API_KEY = os.environ.get('OPENAI_API_KEY')
 
 def get_prompt(message, subject, addendum):
   prompt_messages = {
@@ -196,7 +199,7 @@ def openai(message, addendum, subject, tokenIds={}):
         }
         response = requests.post('https://api.openai.com/v1/chat/completions', json=params, headers={
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer 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'
+            'Authorization': f'Bearer {API_KEY}'
         })
         data = response.json()
     except Exception as e:

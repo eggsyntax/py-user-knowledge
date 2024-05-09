@@ -480,7 +480,7 @@ def process_profiles(profiles):
             for i, calibrated_match in enumerate(calibrated_matches):
                 print(f'Current calibrated match: {calibrated_match}') # XXX
                 for j, label in enumerate(sorted_classes):
-                    print(f'Original match for {label}: {matches[i][category]['estimate'].get(label)}') # XXX
+                    print(f'Original match for {label}: {matches[i][category]["estimate"].get(label)}') # XXX
                     print(f'Setting it to {utils.to_percent(calibrated_match[j])}') # XXX
                     matches[i][category]['estimate'][label] = utils.to_percent(calibrated_match[j])
     matches_by_topic = matches_to_matches_by_topic(matches)

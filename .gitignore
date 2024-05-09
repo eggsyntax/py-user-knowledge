@@ -5,3 +5,4 @@ __pycache__/
 # on other machines with `conda env create -f=conda_env.yml`.
 .conda/
 scratchpad.py
+.envrc

@@ -2,6 +2,7 @@ Series of experiments testing how well LLMs (mainly GPT-3.5) can predict
 demographics from text (mainly OKCupid profiles).
 
 To run from the command line:
+- Make sure that OPENAI_API_KEY is defined in your environment
 - Install packages (untested as yet, please let me know if you encounter difficulties): `conda install --file conda_requirements.txt`
 - `python test-demographics.py`
 
