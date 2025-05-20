@@ -34,7 +34,6 @@ readline=8.2=h1a28f6b_0
 requests=2.31.0=py312hca03da5_1
 scikit-learn=1.3.0=py312hd77ebd4_2
 scipy=1.12.0=py312hfa28a95_0
-setuptools=68.2.2=py312hca03da5_0
 sqlite=3.41.2=h80987f9_0
 tenacity=8.2.2=py312hca03da5_1
 threadpoolctl=2.2.0=pyh0d69192_0
